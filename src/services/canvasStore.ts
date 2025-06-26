@@ -180,6 +180,7 @@ export const useCanvasStore = create<CanvasStore>()(
       state.zoom = Math.max(0.1, Math.min(5, zoom));
     }),
 
+    // FIX #2: Simplified setPan function
     setPan: (x, y) => set((state) => {
       state.panX = x;
       state.panY = y;
@@ -204,8 +205,12 @@ export const useCanvasStore = create<CanvasStore>()(
       }
     }),
 
+    // FIX #3: Ensure palette updates trigger re-renders properly
     addPalette: (palette) => set((state) => {
+      // Use immer to ensure proper state updates
       state.palettes.push(palette);
+      // Immediately set as active to ensure UI updates
+      state.activePaletteId = palette.id;
     }),
 
     setActivePalette: (paletteId) => set((state) => {

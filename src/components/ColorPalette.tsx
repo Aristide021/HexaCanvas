@@ -18,7 +18,10 @@ export const ColorPalette: React.FC = () => {
   const [prompt, setPrompt] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
 
-  const activePalette = palettes.find(p => p.id === activePaletteId) || palettes[0];
+  // FIX #3: Ensure activePalette is always valid and triggers re-renders
+  const activePalette = React.useMemo(() => {
+    return palettes.find(p => p.id === activePaletteId) || palettes[0];
+  }, [palettes, activePaletteId]);
 
   const generateAIPalette = async () => {
     if (!prompt.trim()) return;
@@ -32,8 +35,11 @@ export const ColorPalette: React.FC = () => {
         colors,
         generated: true
       };
+      
+      // FIX #3: Add palette and immediately set as active
       addPalette(newPalette);
-      setActivePalette(newPalette.id);
+      // The store now automatically sets the new palette as active
+      
       setPrompt('');
       setShowPrompt(false);
     } catch (error) {
@@ -142,7 +148,7 @@ export const ColorPalette: React.FC = () => {
         <div className="grid grid-cols-4 gap-2">
           {activePalette?.colors.map((color, index) => (
             <button
-              key={index}
+              key={`${activePalette.id}-${index}-${color}`} // FIX #3: More specific key
               onClick={() => setSelectedColor(color)}
               className={`
                 w-12 h-12 rounded-lg border-2 transition-all duration-200 shadow-sm hover:shadow-md

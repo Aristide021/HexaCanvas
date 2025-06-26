@@ -11,7 +11,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hexGrid] = useState(() => new HexGrid(20));
   const [isDragging, setIsDragging] = useState(false);
-  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+  const panOffset = useRef({ x: 0, y: 0 });
 
   const {
     layers,
@@ -30,6 +30,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     currentUser
   } = useCanvasStore();
 
+  // FIX #1: Complete dependency array for draw function
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -67,7 +68,11 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     });
 
     ctx.restore();
-  }, [layers, zoom, panX, panY, showGrid, users, currentUser, width, height]);
+  }, [
+    // FIX #1: Include ALL dependencies that draw function uses
+    width, height, layers, zoom, panX, panY, showGrid, 
+    users, currentUser, hexGrid
+  ]);
 
   const drawHexGrid = (ctx: CanvasRenderingContext2D) => {
     const gridSize = hexGrid.getSize();
@@ -138,11 +143,12 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     return { x, y };
   };
 
+  // FIX #2: Improved panning with useRef to avoid stale state
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       // Middle mouse or Alt+click for panning
       setIsDragging(true);
-      setLastMousePos({ x: e.clientX, y: e.clientY });
+      panOffset.current = { x: e.clientX - panX, y: e.clientY - panY };
       return;
     }
 
@@ -158,12 +164,12 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     }
   };
 
+  // FIX #2: Fixed panning logic using panOffset ref
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (isDragging) {
-      const deltaX = e.clientX - lastMousePos.x;
-      const deltaY = e.clientY - lastMousePos.y;
-      setPan(panX + deltaX, panY + deltaY);
-      setLastMousePos({ x: e.clientX, y: e.clientY });
+      const newPanX = e.clientX - panOffset.current.x;
+      const newPanY = e.clientY - panOffset.current.y;
+      setPan(newPanX, newPanY);
       return;
     }
 
@@ -191,6 +197,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [draw]);
 
+  // This effect will now properly re-run when draw dependencies change
   useEffect(() => {
     draw();
   }, [draw]);
