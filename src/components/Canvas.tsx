@@ -114,7 +114,9 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   ]);
 
   const drawGrid = useCallback((ctx: CanvasRenderingContext2D) => {
-    const visibleRadius = Math.ceil(Math.max(width, height) / (zoom * gridSize * 2)) + 2;
+    // Increase the visible radius significantly for triangle grid
+    const baseRadius = Math.ceil(Math.max(width, height) / (zoom * gridSize * 2)) + 2;
+    const visibleRadius = globalGridType === 'triangle' ? baseRadius * 2 : baseRadius;
     
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
@@ -122,21 +124,25 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     // Draw grid using the global grid type
     const grid = gridManager.getGrid(globalGridType);
 
-    for (let q = -visibleRadius; q <= visibleRadius; q++) {
-      for (let r = Math.max(-visibleRadius, -q - visibleRadius); 
-           r <= Math.min(visibleRadius, -q + visibleRadius); r++) {
+    // For triangle grid, we need denser coverage
+    const step = globalGridType === 'triangle' ? 1 : 1;
+    
+    for (let q = -visibleRadius; q <= visibleRadius; q += step) {
+      for (let r = -visibleRadius; r <= visibleRadius; r += step) {
         const { x, y } = grid.axialToPixel(q, r);
         const vertices = grid.getCellVertices(x, y);
         
-        ctx.beginPath();
-        ctx.moveTo(vertices[0].x, vertices[0].y);
-        
-        for (let i = 1; i < vertices.length; i++) {
-          ctx.lineTo(vertices[i].x, vertices[i].y);
+        if (vertices.length > 0) {
+          ctx.beginPath();
+          ctx.moveTo(vertices[0].x, vertices[0].y);
+          
+          for (let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i].x, vertices[i].y);
+          }
+          
+          ctx.closePath();
+          ctx.stroke();
         }
-        
-        ctx.closePath();
-        ctx.stroke();
       }
     }
   }, [gridManager, globalGridType, width, height, zoom, gridSize]);
@@ -149,6 +155,8 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     
     const { x, y } = grid.axialToPixel(q, r);
     const vertices = grid.getCellVertices(x, y);
+    
+    if (vertices.length === 0) return;
     
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -170,6 +178,8 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number) => {
     const { x, y } = interactionGrid.axialToPixel(q, r);
     const vertices = interactionGrid.getCellVertices(x, y);
+    
+    if (vertices.length === 0) return;
     
     if (activeTool === 'brush') {
       // Show brush preview with selected color
