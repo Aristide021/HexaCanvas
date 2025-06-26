@@ -303,9 +303,8 @@ export const useCanvasStore = create<CanvasStore>()(
       });
     },
 
-    // FIXED: Optimized paintCell with proper stroke tracking
-    paintCell: (q, r, color) => {
-      const state = get();
+    // FIXED: All mutations now happen within set() callback
+    paintCell: (q, r, color) => set((state) => {
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
       
       if (!activeLayer || activeLayer.locked) return;
@@ -329,55 +328,49 @@ export const useCanvasStore = create<CanvasStore>()(
       }
 
       // Execute immediately
-      set((state) => {
-        const layer = state.layers.find(l => l.id === state.activeLayerId);
-        if (layer) {
-          const cell: HexCell = {
-            id: cellId,
-            q,
-            r,
-            color,
-            layerId: layer.id,
-            timestamp: Date.now()
-          };
-          layer.cells.set(cellId, cell);
-          
-          // Only add to history for single clicks (not during painting strokes)
-          if (!state.isPainting) {
-            const command: PaintCommand = {
-              type: 'paint',
-              cellId,
-              layerId: layer.id,
-              newColor: color,
-              previousColor: existingCell?.color,
-              wasEmpty: !existingCell,
-              timestamp: Date.now(),
-              userId: state.currentUser.id,
-              execute: () => {},
-              undo: () => {}
-            };
-            
-            if (state.historyIndex < state.history.length - 1) {
-              state.history.splice(state.historyIndex + 1);
-            }
-            
-            state.history.push(command);
-            
-            if (state.history.length > state.maxHistorySize) {
-              state.history.shift();
-            } else {
-              state.historyIndex++;
-            }
-            
-            state.historyIndex = state.history.length - 1;
-          }
+      const cell: HexCell = {
+        id: cellId,
+        q,
+        r,
+        color,
+        layerId: activeLayer.id,
+        timestamp: Date.now()
+      };
+      activeLayer.cells.set(cellId, cell);
+      
+      // Only add to history for single clicks (not during painting strokes)
+      if (!state.isPainting) {
+        const command: PaintCommand = {
+          type: 'paint',
+          cellId,
+          layerId: activeLayer.id,
+          newColor: color,
+          previousColor: existingCell?.color,
+          wasEmpty: !existingCell,
+          timestamp: Date.now(),
+          userId: state.currentUser.id,
+          execute: () => {},
+          undo: () => {}
+        };
+        
+        if (state.historyIndex < state.history.length - 1) {
+          state.history.splice(state.historyIndex + 1);
         }
-      });
-    },
+        
+        state.history.push(command);
+        
+        if (state.history.length > state.maxHistorySize) {
+          state.history.shift();
+        } else {
+          state.historyIndex++;
+        }
+        
+        state.historyIndex = state.history.length - 1;
+      }
+    }),
 
-    // FIXED: Optimized eraseCell with proper stroke tracking
-    eraseCell: (q, r) => {
-      const state = get();
+    // FIXED: All mutations now happen within set() callback
+    eraseCell: (q, r) => set((state) => {
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
       
       if (!activeLayer || activeLayer.locked) return;
@@ -398,41 +391,36 @@ export const useCanvasStore = create<CanvasStore>()(
       }
 
       // Execute immediately
-      set((state) => {
-        const layer = state.layers.find(l => l.id === state.activeLayerId);
-        if (layer) {
-          layer.cells.delete(cellId);
-          
-          // Only add to history for single clicks (not during painting strokes)
-          if (!state.isPainting) {
-            const command: EraseCommand = {
-              type: 'erase',
-              cellId,
-              layerId: layer.id,
-              previousColor: existingCell.color,
-              timestamp: Date.now(),
-              userId: state.currentUser.id,
-              execute: () => {},
-              undo: () => {}
-            };
-            
-            if (state.historyIndex < state.history.length - 1) {
-              state.history.splice(state.historyIndex + 1);
-            }
-            
-            state.history.push(command);
-            
-            if (state.history.length > state.maxHistorySize) {
-              state.history.shift();
-            } else {
-              state.historyIndex++;
-            }
-            
-            state.historyIndex = state.history.length - 1;
-          }
+      activeLayer.cells.delete(cellId);
+      
+      // Only add to history for single clicks (not during painting strokes)
+      if (!state.isPainting) {
+        const command: EraseCommand = {
+          type: 'erase',
+          cellId,
+          layerId: activeLayer.id,
+          previousColor: existingCell.color,
+          timestamp: Date.now(),
+          userId: state.currentUser.id,
+          execute: () => {},
+          undo: () => {}
+        };
+        
+        if (state.historyIndex < state.history.length - 1) {
+          state.history.splice(state.historyIndex + 1);
         }
-      });
-    },
+        
+        state.history.push(command);
+        
+        if (state.history.length > state.maxHistorySize) {
+          state.history.shift();
+        } else {
+          state.historyIndex++;
+        }
+        
+        state.historyIndex = state.history.length - 1;
+      }
+    }),
 
     // FIXED: Improved fillArea with batch command for single undo
     fillArea: (q, r, color) => {
