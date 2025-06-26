@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useCanvasStore } from '../services/canvasStore';
-import { useHexGrid } from '../hooks/useHexGrid';
+import { useGridManager } from '../hooks/useHexGrid';
 import { calculateViewportBounds, isCellInViewport } from '../utils/performance';
 
 interface CanvasProps {
@@ -25,6 +25,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     activeTool,
     isPainting,
     gridSize,
+    globalGridType,
     paintCell,
     eraseCell,
     fillArea,
@@ -37,27 +38,26 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     currentUser
   } = useCanvasStore();
 
-  // Create hex grid with dynamic size
-  const { grid } = useHexGrid(gridSize);
+  // Use the new grid manager with global grid type
+  const { gridManager, getGridForLayer } = useGridManager(gridSize, globalGridType);
 
-  // Update grid size when it changes
-  useEffect(() => {
-    grid.setSize(gridSize);
-  }, [grid, gridSize]);
+  // Get the active layer to determine which grid to use for interactions
+  const activeLayer = layers.find(l => l.id === activeLayerId);
+  const interactionGrid = activeLayer ? getGridForLayer(activeLayer.gridType) : gridManager.getGrid();
 
   // Calculate viewport bounds for performance optimization
   const viewportBounds = useMemo(() => 
-    calculateViewportBounds(width, height, zoom, panX, panY, grid.getSize()),
-    [width, height, zoom, panX, panY, grid]
+    calculateViewportBounds(width, height, zoom, panX, panY, gridSize),
+    [width, height, zoom, panX, panY, gridSize]
   );
 
   // Filter visible cells for performance
   const visibleCells = useMemo(() => {
-    const cells: Array<{ q: number; r: number; color: string; layerId: string }> = [];
+    const cells: Array<{ q: number; r: number; color: string; layerId: string; gridType: string }> = [];
     layers.filter(layer => layer.visible).forEach(layer => {
       layer.cells.forEach(cell => {
         if (isCellInViewport(cell.q, cell.r, viewportBounds)) {
-          cells.push(cell);
+          cells.push({ ...cell, gridType: layer.gridType });
         }
       });
     });
@@ -81,7 +81,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
     // Draw grid if enabled
     if (showGrid) {
-      drawHexGrid(ctx);
+      drawGrid(ctx);
     }
 
     // Draw visible cells only (performance optimization)
@@ -89,7 +89,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       const layer = layers.find(l => l.id === cell.layerId);
       if (layer) {
         ctx.globalAlpha = layer.opacity;
-        drawHexCell(ctx, cell.q, cell.r, cell.color);
+        drawCell(ctx, cell.q, cell.r, cell.color, layer.gridType);
       }
     });
 
@@ -110,21 +110,23 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.restore();
   }, [
     width, height, layers, zoom, panX, panY, showGrid, 
-    users, currentUser, grid, visibleCells, hoverCell, activeTool, selectedColor
+    users, currentUser, gridManager, visibleCells, hoverCell, activeTool, selectedColor, globalGridType
   ]);
 
-  const drawHexGrid = useCallback((ctx: CanvasRenderingContext2D) => {
-    const gridSize = grid.getSize();
+  const drawGrid = useCallback((ctx: CanvasRenderingContext2D) => {
     const visibleRadius = Math.ceil(Math.max(width, height) / (zoom * gridSize * 2)) + 2;
     
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
 
+    // Draw grid using the global grid type
+    const grid = gridManager.getGrid(globalGridType);
+
     for (let q = -visibleRadius; q <= visibleRadius; q++) {
       for (let r = Math.max(-visibleRadius, -q - visibleRadius); 
            r <= Math.min(visibleRadius, -q + visibleRadius); r++) {
         const { x, y } = grid.axialToPixel(q, r);
-        const vertices = grid.getHexVertices(x, y);
+        const vertices = grid.getCellVertices(x, y);
         
         ctx.beginPath();
         ctx.moveTo(vertices[0].x, vertices[0].y);
@@ -137,11 +139,16 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         ctx.stroke();
       }
     }
-  }, [grid, width, height, zoom]);
+  }, [gridManager, globalGridType, width, height, zoom, gridSize]);
 
-  const drawHexCell = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number, color: string) => {
+  const drawCell = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number, color: string, layerGridType: string) => {
+    // Get the appropriate grid for this layer
+    const grid = layerGridType === 'pixel' ? 
+      gridManager.getGrid('pixel') : 
+      gridManager.getGrid(globalGridType);
+    
     const { x, y } = grid.axialToPixel(q, r);
-    const vertices = grid.getHexVertices(x, y);
+    const vertices = grid.getCellVertices(x, y);
     
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -158,11 +165,11 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
     ctx.stroke();
-  }, [grid, zoom]);
+  }, [gridManager, globalGridType, zoom]);
 
   const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number) => {
-    const { x, y } = grid.axialToPixel(q, r);
-    const vertices = grid.getHexVertices(x, y);
+    const { x, y } = interactionGrid.axialToPixel(q, r);
+    const vertices = interactionGrid.getCellVertices(x, y);
     
     if (activeTool === 'brush') {
       // Show brush preview with selected color
@@ -221,7 +228,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     
     ctx.closePath();
     ctx.stroke();
-  }, [grid, zoom, activeTool, selectedColor]);
+  }, [interactionGrid, zoom, activeTool, selectedColor]);
 
   const drawUserCursor = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, color: string, name: string) => {
     ctx.fillStyle = color;
@@ -255,7 +262,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
     if (e.button === 0) {
       const { x, y } = getMousePos(e);
-      const axial = grid.pixelToAxial(x, y);
+      const axial = interactionGrid.pixelToAxial(x, y);
       
       if (activeTool === 'picker') {
         // Color picker tool
@@ -280,14 +287,13 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         }
       }
     }
-  }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
+  }, [getMousePos, interactionGrid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
 
-  // CRITICAL FIX: Separate hover updates from painting for optimal performance
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getMousePos(e);
-    const axial = grid.pixelToAxial(x, y);
+    const axial = interactionGrid.pixelToAxial(x, y);
     
-    // Always update hover cell for preview (throttled separately if needed)
+    // Always update hover cell for preview
     if (!hoverCell || hoverCell.q !== axial.q || hoverCell.r !== axial.r) {
       setHoverCell({ q: axial.q, r: axial.r });
     }
@@ -299,7 +305,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       return;
     }
 
-    // CRITICAL FIX: Direct, unthrottled painting during drag for smooth strokes
+    // Direct, unthrottled painting during drag for smooth strokes
     if (isPainting && (activeTool === 'brush' || activeTool === 'eraser')) {
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
@@ -307,7 +313,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         eraseCell(axial.q, axial.r);
       }
     }
-  }, [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, hoverCell]);
+  }, [isDragging, isPainting, setPan, getMousePos, interactionGrid, activeTool, selectedColor, paintCell, eraseCell, hoverCell]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);

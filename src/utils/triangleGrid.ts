@@ -9,20 +9,16 @@ export class TriangleGrid implements IGrid {
 
   // Convert axial coordinates to pixel coordinates for triangular grid
   axialToPixel(q: number, r: number): { x: number; y: number } {
-    // Triangular grid math - each triangle has a base width and height
+    // Triangular grid uses a different coordinate system
+    // Each triangle has a base width and height
     const width = this.size * Math.sqrt(3);
     const height = this.size * 1.5;
     
-    // Determine if this is an upward or downward pointing triangle
-    const isUpward = (q + r) % 2 === 0;
+    // Calculate base position
+    const x = q * width * 0.5 + (r % 2) * width * 0.25;
+    const y = r * height * 0.67;
     
-    const x = q * width * 0.5;
-    const y = r * height * (2/3);
-    
-    // Offset downward triangles slightly
-    const offsetY = isUpward ? 0 : height * 0.33;
-    
-    return { x, y: y + offsetY };
+    return { x, y };
   }
 
   // Convert pixel coordinates to axial coordinates
@@ -31,8 +27,8 @@ export class TriangleGrid implements IGrid {
     const height = this.size * 1.5;
     
     // Approximate grid position
-    const q = Math.round((x * 2) / width);
-    const r = Math.round((y * 3) / (height * 2));
+    const r = Math.round(y / (height * 0.67));
+    const q = Math.round((x - (r % 2) * width * 0.25) / (width * 0.5));
     
     return this.roundTriangle({ q, r });
   }
@@ -49,9 +45,10 @@ export class TriangleGrid implements IGrid {
     const height = this.size;
     const width = this.size * Math.sqrt(3) / 2;
     
-    // Determine triangle orientation based on position
-    // For simplicity, we'll alternate between up and down triangles
-    const isUpward = true; // This would be calculated based on q,r coordinates
+    // Determine triangle orientation based on grid position
+    // We'll use a checkerboard pattern: even sum = up, odd sum = down
+    const { q, r } = this.pixelToAxial(centerX, centerY);
+    const isUpward = (q + r) % 2 === 0;
     
     if (isUpward) {
       // Upward pointing triangle
@@ -70,16 +67,26 @@ export class TriangleGrid implements IGrid {
     }
   }
 
-  // Get neighbors of a triangle cell (triangles have 3 neighbors)
+  // Get neighbors of a triangle cell
   getNeighbors(q: number, r: number): CellCoordinate[] {
-    // Triangle neighbor logic is more complex than hex
-    // This is a simplified version
-    return [
-      { q: q + 1, r: r },
-      { q: q - 1, r: r },
-      { q: q, r: r + 1 },
-      { q: q, r: r - 1 }
-    ];
+    // Triangle neighbors depend on orientation
+    const isUpward = (q + r) % 2 === 0;
+    
+    if (isUpward) {
+      // Upward triangle has 3 neighbors below and sides
+      return [
+        { q: q - 1, r: r },     // Left
+        { q: q + 1, r: r },     // Right
+        { q: q, r: r + 1 }      // Below
+      ];
+    } else {
+      // Downward triangle has 3 neighbors above and sides
+      return [
+        { q: q - 1, r: r },     // Left
+        { q: q + 1, r: r },     // Right
+        { q: q, r: r - 1 }      // Above
+      ];
+    }
   }
 
   // Check if point is inside triangle cell bounds
