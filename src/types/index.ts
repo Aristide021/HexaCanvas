@@ -60,7 +60,7 @@ export interface Session {
   lastModified: number;
 }
 
-// Command Pattern for Undo/Redo
+// Enhanced Command Pattern for Undo/Redo
 export interface Command {
   execute(): void;
   undo(): void;
@@ -90,7 +90,13 @@ export interface LayerCommand extends Command {
   layerData?: any;
 }
 
-export type AnyCommand = PaintCommand | EraseCommand | LayerCommand;
+export interface BatchCommand extends Command {
+  type: 'batch';
+  commands: AnyCommand[];
+  name: string; // e.g., "Fill Area", "Brush Stroke"
+}
+
+export type AnyCommand = PaintCommand | EraseCommand | LayerCommand | BatchCommand;
 
 export interface Delta {
   type: 'cell_update' | 'layer_add' | 'layer_remove' | 'layer_update';

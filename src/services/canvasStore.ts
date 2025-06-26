@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { CanvasState, Layer, HexCell, Tool, ColorPalette, User, AnyCommand, PaintCommand, EraseCommand } from '../types';
+import { CanvasState, Layer, HexCell, Tool, ColorPalette, User, AnyCommand, PaintCommand, EraseCommand, BatchCommand } from '../types';
 
 interface CanvasStore extends CanvasState {
   // Canvas state
   selectedColor: string;
   activeTool: string;
   isPainting: boolean;
+  currentStroke: { command: 'paint' | 'erase'; cells: Map<string, { previousColor?: string, wasEmpty: boolean }> } | null;
   
   // History system
   history: AnyCommand[];
@@ -78,7 +79,7 @@ const createDefaultPalette = (): ColorPalette => ({
   generated: false
 });
 
-// FIXED: Completely rewritten flood fill with proper hexagonal connectivity
+// FIXED: Robust flood fill with proper hexagonal connectivity and performance optimization
 const floodFill = (
   layers: Layer[],
   activeLayerId: string,
@@ -110,7 +111,7 @@ const floodFill = (
     { q: 0, r: 1 }    // Southeast
   ];
 
-  const MAX_CELLS = 5000; // Reduced for better performance
+  const MAX_CELLS = 2000; // Optimized for better performance
   let processedCells = 0;
 
   while (toProcess.length > 0 && processedCells < MAX_CELLS) {
@@ -149,7 +150,6 @@ const floodFill = (
     console.warn(`Fill operation limited to ${MAX_CELLS} cells for performance`);
   }
 
-  console.log(`Fill operation: Found ${changes.length} connected cells to fill`);
   return changes;
 };
 
@@ -166,6 +166,7 @@ export const useCanvasStore = create<CanvasStore>()(
     selectedColor: '#FF5733',
     activeTool: 'brush',
     isPainting: false,
+    currentStroke: null,
     
     // History
     history: [],
@@ -226,13 +227,83 @@ export const useCanvasStore = create<CanvasStore>()(
 
     startPainting: () => set((state) => {
       state.isPainting = true;
+      state.currentStroke = { 
+        command: state.activeTool as 'paint' | 'erase', 
+        cells: new Map() 
+      };
     }),
 
-    stopPainting: () => set((state) => {
-      state.isPainting = false;
-    }),
+    stopPainting: () => {
+      const state = get();
+      if (!state.isPainting || !state.currentStroke || state.currentStroke.cells.size === 0) {
+        set((s) => {
+          s.isPainting = false;
+          s.currentStroke = null;
+        });
+        return;
+      }
+      
+      const { command, cells } = state.currentStroke;
+      const commands: (PaintCommand | EraseCommand)[] = [];
 
-    // CRITICAL FIX: Completely removed lastPaintedCell tracking for smooth dragging
+      cells.forEach((change, cellId) => {
+        if (command === 'paint') {
+          commands.push({
+            type: 'paint',
+            cellId,
+            layerId: state.activeLayerId,
+            newColor: state.selectedColor,
+            previousColor: change.previousColor,
+            wasEmpty: change.wasEmpty,
+            timestamp: Date.now(),
+            userId: state.currentUser.id,
+            execute: () => {},
+            undo: () => {}
+          });
+        } else { // command === 'erase'
+          commands.push({
+            type: 'erase',
+            cellId,
+            layerId: state.activeLayerId,
+            previousColor: change.previousColor!,
+            timestamp: Date.now(),
+            userId: state.currentUser.id,
+            execute: () => {},
+            undo: () => {}
+          });
+        }
+      });
+      
+      // Create batch command for the entire stroke
+      const batch: BatchCommand = {
+        type: 'batch',
+        name: command === 'paint' ? 'Brush Stroke' : 'Erase Stroke',
+        commands,
+        timestamp: Date.now(),
+        userId: state.currentUser.id,
+        execute: () => {},
+        undo: () => {}
+      };
+      
+      set((s) => {
+        if (s.historyIndex < s.history.length - 1) {
+          s.history.splice(s.historyIndex + 1);
+        }
+        s.history.push(batch);
+        
+        if (s.history.length > s.maxHistorySize) {
+          s.history.shift();
+        } else {
+          s.historyIndex++;
+        }
+        
+        s.historyIndex = s.history.length - 1;
+        s.isPainting = false;
+        s.currentStroke = null;
+      });
+    },
+
+    // FIXED: Optimized paintCell with proper stroke tracking
     paintCell: (q, r, color) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -247,40 +318,45 @@ export const useCanvasStore = create<CanvasStore>()(
         return;
       }
       
-      const wasEmpty = !existingCell;
-      const previousColor = existingCell?.color;
-      
-      // Create the command with proper execution logic
-      const command: PaintCommand = {
-        type: 'paint',
-        cellId,
-        layerId: activeLayer.id,
-        newColor: color,
-        previousColor,
-        wasEmpty,
-        timestamp: Date.now(),
-        userId: state.currentUser.id,
-        execute: () => {},
-        undo: () => {}
-      };
-      
-      // Execute immediately and add to history only for discrete actions
+      // Track stroke for batch undo/redo
+      if (state.isPainting && state.currentStroke) {
+        if (!state.currentStroke.cells.has(cellId)) {
+          state.currentStroke.cells.set(cellId, { 
+            previousColor: existingCell?.color, 
+            wasEmpty: !existingCell 
+          });
+        }
+      }
+
+      // Execute immediately
       set((state) => {
-        const layer = state.layers.find(l => l.id === command.layerId);
+        const layer = state.layers.find(l => l.id === state.activeLayerId);
         if (layer) {
           const cell: HexCell = {
             id: cellId,
             q,
             r,
-            color: command.newColor,
+            color,
             layerId: layer.id,
-            timestamp: command.timestamp
+            timestamp: Date.now()
           };
           layer.cells.set(cellId, cell);
           
-          // Only add to history if not painting continuously (for undo/redo efficiency)
+          // Only add to history for single clicks (not during painting strokes)
           if (!state.isPainting) {
-            // Add to history
+            const command: PaintCommand = {
+              type: 'paint',
+              cellId,
+              layerId: layer.id,
+              newColor: color,
+              previousColor: existingCell?.color,
+              wasEmpty: !existingCell,
+              timestamp: Date.now(),
+              userId: state.currentUser.id,
+              execute: () => {},
+              undo: () => {}
+            };
+            
             if (state.historyIndex < state.history.length - 1) {
               state.history.splice(state.historyIndex + 1);
             }
@@ -299,7 +375,7 @@ export const useCanvasStore = create<CanvasStore>()(
       });
     },
 
-    // CRITICAL FIX: Completely removed lastPaintedCell tracking for smooth erasing
+    // FIXED: Optimized eraseCell with proper stroke tracking
     eraseCell: (q, r) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -311,26 +387,35 @@ export const useCanvasStore = create<CanvasStore>()(
       
       if (!existingCell) return;
       
-      const command: EraseCommand = {
-        type: 'erase',
-        cellId,
-        layerId: activeLayer.id,
-        previousColor: existingCell.color,
-        timestamp: Date.now(),
-        userId: state.currentUser.id,
-        execute: () => {},
-        undo: () => {}
-      };
-      
-      // Execute immediately and add to history only for discrete actions
+      // Track stroke for batch undo/redo
+      if (state.isPainting && state.currentStroke) {
+        if (!state.currentStroke.cells.has(cellId)) {
+          state.currentStroke.cells.set(cellId, { 
+            previousColor: existingCell.color, 
+            wasEmpty: false 
+          });
+        }
+      }
+
+      // Execute immediately
       set((state) => {
-        const layer = state.layers.find(l => l.id === command.layerId);
+        const layer = state.layers.find(l => l.id === state.activeLayerId);
         if (layer) {
           layer.cells.delete(cellId);
           
-          // Only add to history if not painting continuously (for undo/redo efficiency)
+          // Only add to history for single clicks (not during painting strokes)
           if (!state.isPainting) {
-            // Add to history
+            const command: EraseCommand = {
+              type: 'erase',
+              cellId,
+              layerId: layer.id,
+              previousColor: existingCell.color,
+              timestamp: Date.now(),
+              userId: state.currentUser.id,
+              execute: () => {},
+              undo: () => {}
+            };
+            
             if (state.historyIndex < state.history.length - 1) {
               state.history.splice(state.historyIndex + 1);
             }
@@ -349,7 +434,7 @@ export const useCanvasStore = create<CanvasStore>()(
       });
     },
 
-    // FIXED: Improved fillArea with proper hexagonal shape
+    // FIXED: Improved fillArea with batch command for single undo
     fillArea: (q, r, color) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -357,15 +442,11 @@ export const useCanvasStore = create<CanvasStore>()(
       if (!activeLayer || activeLayer.locked) return;
       
       try {
-        // Get all cells that need to be changed using improved flood fill
         const changes = floodFill(state.layers, state.activeLayerId, q, r, color);
         
         if (changes.length === 0) {
-          console.log('Fill operation: No changes needed (same color or no connected area)');
           return;
         }
-        
-        console.log(`Fill operation: Changing ${changes.length} cells`);
         
         // Create batch command for all changes
         const commands: PaintCommand[] = changes.map(change => ({
@@ -381,7 +462,17 @@ export const useCanvasStore = create<CanvasStore>()(
           undo: () => {}
         }));
         
-        // Execute all changes in a single state update
+        const batch: BatchCommand = {
+          type: 'batch',
+          name: 'Fill Area',
+          commands,
+          timestamp: Date.now(),
+          userId: state.currentUser.id,
+          execute: () => {},
+          undo: () => {}
+        };
+        
+        // Execute all changes and add to history as single operation
         set((state) => {
           const layer = state.layers.find(l => l.id === activeLayer.id);
           if (layer) {
@@ -398,29 +489,25 @@ export const useCanvasStore = create<CanvasStore>()(
               layer.cells.set(command.cellId, cell);
             });
             
-            // Add all commands to history as a batch
+            // Add batch to history
             if (state.historyIndex < state.history.length - 1) {
               state.history.splice(state.historyIndex + 1);
             }
             
-            commands.forEach(command => {
-              state.history.push(command);
-            });
+            state.history.push(batch);
             
             if (state.history.length > state.maxHistorySize) {
-              const excess = state.history.length - state.maxHistorySize;
-              state.history.splice(0, excess);
+              state.history.shift();
+            } else {
+              state.historyIndex++;
             }
             
             state.historyIndex = state.history.length - 1;
           }
         });
         
-        console.log('Fill operation completed successfully');
-        
       } catch (error) {
         console.error('Fill operation failed:', error);
-        alert('Fill operation failed. Please try again.');
       }
     },
 
@@ -441,66 +528,65 @@ export const useCanvasStore = create<CanvasStore>()(
             // Automatically switch back to brush tool after picking
             state.activeTool = 'brush';
           });
-          console.log(`Color picked: ${cell.color}`);
           return;
         }
       }
-      
-      console.log('No color found at this position');
     },
 
     executeCommand: (command) => {
-      // This method is kept for potential future use but not needed for basic paint/erase
       command.execute();
     },
 
+    // FIXED: Enhanced undo with batch command support
     undo: () => {
       const state = get();
       if (state.canUndo()) {
-        const command = state.history[state.historyIndex];
+        const commandToUndo = state.history[state.historyIndex];
         
         set((state) => {
-          if (command.type === 'paint') {
-            const paintCmd = command as PaintCommand;
-            const layer = state.layers.find(l => l.id === paintCmd.layerId);
-            if (layer) {
+          state.historyIndex--;
+
+          const commands = commandToUndo.type === 'batch' 
+            ? [...(commandToUndo as BatchCommand).commands].reverse() 
+            : [commandToUndo];
+
+          for (const command of commands) {
+            const layer = state.layers.find(l => l.id === command.layerId);
+            if (!layer) continue;
+            
+            if (command.type === 'paint') {
+              const paintCmd = command as PaintCommand;
               if (paintCmd.wasEmpty) {
                 layer.cells.delete(paintCmd.cellId);
               } else if (paintCmd.previousColor) {
                 const [q, r] = paintCmd.cellId.split(',').map(Number);
-                const cell: HexCell = {
-                  id: paintCmd.cellId,
-                  q,
-                  r,
-                  color: paintCmd.previousColor,
-                  layerId: layer.id,
-                  timestamp: Date.now()
-                };
-                layer.cells.set(paintCmd.cellId, cell);
+                layer.cells.set(paintCmd.cellId, { 
+                  id: paintCmd.cellId, 
+                  q, 
+                  r, 
+                  color: paintCmd.previousColor, 
+                  layerId: layer.id, 
+                  timestamp: Date.now() 
+                });
               }
-            }
-          } else if (command.type === 'erase') {
-            const eraseCmd = command as EraseCommand;
-            const layer = state.layers.find(l => l.id === eraseCmd.layerId);
-            if (layer) {
+            } else if (command.type === 'erase') {
+              const eraseCmd = command as EraseCommand;
               const [q, r] = eraseCmd.cellId.split(',').map(Number);
-              const cell: HexCell = {
-                id: eraseCmd.cellId,
-                q,
-                r,
-                color: eraseCmd.previousColor,
-                layerId: layer.id,
-                timestamp: Date.now()
-              };
-              layer.cells.set(eraseCmd.cellId, cell);
+              layer.cells.set(eraseCmd.cellId, { 
+                id: eraseCmd.cellId, 
+                q, 
+                r, 
+                color: eraseCmd.previousColor, 
+                layerId: layer.id, 
+                timestamp: Date.now() 
+              });
             }
           }
-          
-          state.historyIndex--;
         });
       }
     },
 
+    // FIXED: Enhanced redo with batch command support
     redo: () => {
       const state = get();
       if (state.canRedo()) {
@@ -508,28 +594,30 @@ export const useCanvasStore = create<CanvasStore>()(
           state.historyIndex++;
         });
         
-        const command = state.history[state.historyIndex];
+        const commandToRedo = state.history[state.historyIndex];
         
         set((state) => {
-          if (command.type === 'paint') {
-            const paintCmd = command as PaintCommand;
-            const layer = state.layers.find(l => l.id === paintCmd.layerId);
-            if (layer) {
+          const commands = commandToRedo.type === 'batch' 
+            ? (commandToRedo as BatchCommand).commands 
+            : [commandToRedo];
+
+          for (const command of commands) {
+            const layer = state.layers.find(l => l.id === command.layerId);
+            if (!layer) continue;
+            
+            if (command.type === 'paint') {
+              const paintCmd = command as PaintCommand;
               const [q, r] = paintCmd.cellId.split(',').map(Number);
-              const cell: HexCell = {
-                id: paintCmd.cellId,
-                q,
-                r,
-                color: paintCmd.newColor,
-                layerId: layer.id,
-                timestamp: paintCmd.timestamp
-              };
-              layer.cells.set(paintCmd.cellId, cell);
-            }
-          } else if (command.type === 'erase') {
-            const eraseCmd = command as EraseCommand;
-            const layer = state.layers.find(l => l.id === eraseCmd.layerId);
-            if (layer) {
+              layer.cells.set(paintCmd.cellId, { 
+                id: paintCmd.cellId, 
+                q, 
+                r, 
+                color: paintCmd.newColor, 
+                layerId: layer.id, 
+                timestamp: paintCmd.timestamp 
+              });
+            } else if (command.type === 'erase') {
+              const eraseCmd = command as EraseCommand;
               layer.cells.delete(eraseCmd.cellId);
             }
           }

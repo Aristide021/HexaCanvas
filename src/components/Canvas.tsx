@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useCanvasStore } from '../services/canvasStore';
 import { useHexGrid } from '../hooks/useHexGrid';
-import { throttle } from '../utils/performance';
 import { calculateViewportBounds, isCellInViewport } from '../utils/performance';
 
 interface CanvasProps {
@@ -283,13 +282,15 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     }
   }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
 
-  // CRITICAL FIX: Completely remove throttling for mouse move during painting
+  // CRITICAL FIX: Separate hover updates from painting for optimal performance
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getMousePos(e);
     const axial = grid.pixelToAxial(x, y);
     
-    // Update hover cell for preview
-    setHoverCell({ q: axial.q, r: axial.r });
+    // Always update hover cell for preview (throttled separately if needed)
+    if (!hoverCell || hoverCell.q !== axial.q || hoverCell.r !== axial.r) {
+      setHoverCell({ q: axial.q, r: axial.r });
+    }
 
     if (isDragging) {
       const newPanX = e.clientX - panOffset.current.x;
@@ -298,7 +299,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       return;
     }
 
-    // CRITICAL FIX: Direct painting without throttling during drag
+    // CRITICAL FIX: Direct, unthrottled painting during drag for smooth strokes
     if (isPainting && (activeTool === 'brush' || activeTool === 'eraser')) {
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
@@ -306,7 +307,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         eraseCell(axial.q, axial.r);
       }
     }
-  }, [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]);
+  }, [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, hoverCell]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
