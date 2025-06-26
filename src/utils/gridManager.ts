@@ -1,6 +1,7 @@
 import { GridType, IGrid } from '../types';
 import { HexGrid } from './hexGrid';
 import { TriangleGrid } from './triangleGrid';
+import { PixelGrid } from './pixelGrid';
 
 export class GridManager {
   private grids: Map<GridType, IGrid> = new Map();
@@ -9,7 +10,7 @@ export class GridManager {
   constructor(size: number = 20) {
     this.grids.set('hexagon', new HexGrid(size));
     this.grids.set('triangle', new TriangleGrid(size));
-    // Pixel grid would be implemented later as a simple rectangular grid
+    this.grids.set('pixel', new PixelGrid(size));
   }
 
   getGrid(gridType?: GridType): IGrid {

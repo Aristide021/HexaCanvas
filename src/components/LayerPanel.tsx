@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, Eye, EyeOff, Lock, Unlock, Plus, Trash2, Edit2, Hexagon, Triangle, Square } from 'lucide-react';
+import { Layers, Eye, EyeOff, Lock, Unlock, Plus, Trash2, Edit2, Hexagon, Triangle, Square, Download } from 'lucide-react';
 import { useCanvasStore } from '../services/canvasStore';
 import { PanelWrapper } from './ui/PanelWrapper';
 import { GridType } from '../types';
@@ -15,7 +15,8 @@ export const LayerPanel: React.FC = () => {
     toggleLayerVisibility,
     updateLayerName,
     globalGridType,
-    setGlobalGridType
+    setGlobalGridType,
+    rasterizeLayer
   } = useCanvasStore();
 
   const [editingLayer, setEditingLayer] = useState<string | null>(null);
@@ -78,6 +79,12 @@ export const LayerPanel: React.FC = () => {
         return 'Pixel';
       default:
         return 'Shape';
+    }
+  };
+
+  const handleRasterizeLayer = (layerId: string) => {
+    if (confirm('Rasterize this layer? This will convert it to a pixel layer and cannot be undone.')) {
+      rasterizeLayer(layerId);
     }
   };
 
@@ -203,6 +210,21 @@ export const LayerPanel: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-1">
+                {/* Rasterize button for shape layers */}
+                {layer.gridType !== 'pixel' && layer.cells.size > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRasterizeLayer(layer.id);
+                    }}
+                    className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    title="Rasterize Layer"
+                    aria-label="Rasterize Layer"
+                  >
+                    <Download size={12} />
+                  </button>
+                )}
+
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -304,6 +326,10 @@ export const LayerPanel: React.FC = () => {
           <div className="flex items-center gap-2">
             <Square size={10} className="text-purple-600" />
             <span><strong>Pixel:</strong> Fixed rectangular grid</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Download size={10} className="text-gray-600" />
+            <span><strong>Rasterize:</strong> Convert shape to pixel layer</span>
           </div>
         </div>
       </div>

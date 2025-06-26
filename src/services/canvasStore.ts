@@ -30,6 +30,7 @@ interface CanvasStore extends CanvasState {
   toggleLayerVisibility: (layerId: string) => void;
   updateLayerName: (layerId: string, name: string) => void;
   setGlobalGridType: (gridType: GridType) => void;
+  rasterizeLayer: (layerId: string) => void;
   
   paintCell: (q: number, r: number, color: string) => void;
   eraseCell: (q: number, r: number) => void;
@@ -72,7 +73,7 @@ const createDefaultLayer = (gridType: GridType = 'hexagon'): Layer => ({
   opacity: 1,
   locked: false,
   cells: new Map(),
-  gridType // NEW: Each layer has its own grid type
+  gridType
 });
 
 const createDefaultPalette = (): ColorPalette => ({
@@ -82,7 +83,7 @@ const createDefaultPalette = (): ColorPalette => ({
   generated: false
 });
 
-// FIXED: Robust flood fill with proper hexagonal connectivity and performance optimization
+// Enhanced flood fill with proper hexagonal connectivity and performance optimization
 const floodFill = (
   layers: Layer[],
   activeLayerId: string,
@@ -104,7 +105,7 @@ const floodFill = (
   const toProcess = [{ q: startQ, r: startR }];
   const changes: Array<{ q: number; r: number; oldColor: string | null }> = [];
 
-  // FIXED: Proper hexagonal neighbor directions (flat-top orientation)
+  // Proper hexagonal neighbor directions (flat-top orientation)
   const hexDirections = [
     { q: 1, r: 0 },   // East
     { q: 1, r: -1 },  // Northeast  
@@ -166,7 +167,7 @@ export const useCanvasStore = create<CanvasStore>()(
     panX: 0,
     panY: 0,
     showGrid: true,
-    globalGridType: 'hexagon', // NEW: Global grid type for shape layers
+    globalGridType: 'hexagon',
     selectedColor: '#FF5733',
     activeTool: 'brush',
     isPainting: false,
@@ -200,7 +201,6 @@ export const useCanvasStore = create<CanvasStore>()(
       state.activeLayerId = newLayer.id;
     }),
 
-    // NEW: Convenience method for adding pixel layers
     addPixelLayer: (name) => set((state) => {
       const newLayer: Layer = {
         id: `layer-${Date.now()}`,
@@ -245,9 +245,26 @@ export const useCanvasStore = create<CanvasStore>()(
       }
     }),
 
-    // NEW: Set global grid type (affects all shape layers)
     setGlobalGridType: (gridType) => set((state) => {
       state.globalGridType = gridType;
+    }),
+
+    // NEW: Rasterize layer functionality
+    rasterizeLayer: (layerId) => set((state) => {
+      const layer = state.layers.find(l => l.id === layerId);
+      if (!layer || layer.gridType === 'pixel') return;
+
+      // Convert the layer to a pixel layer
+      // For now, we'll keep the same cell data but change the grid type
+      // In a full implementation, you might want to actually render to a canvas
+      // and convert to pixel coordinates
+      layer.gridType = 'pixel';
+      layer.name = layer.name.replace('Shape', 'Pixel');
+      
+      // Add a note that this layer has been rasterized
+      if (!layer.name.includes('(Rasterized)')) {
+        layer.name += ' (Rasterized)';
+      }
     }),
 
     startPainting: () => set((state) => {
@@ -328,7 +345,6 @@ export const useCanvasStore = create<CanvasStore>()(
       });
     },
 
-    // FIXED: All mutations now happen within set() callback
     paintCell: (q, r, color) => set((state) => {
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
       
@@ -394,7 +410,6 @@ export const useCanvasStore = create<CanvasStore>()(
       }
     }),
 
-    // FIXED: All mutations now happen within set() callback
     eraseCell: (q, r) => set((state) => {
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
       
@@ -447,7 +462,6 @@ export const useCanvasStore = create<CanvasStore>()(
       }
     }),
 
-    // FIXED: Improved fillArea with batch command for single undo
     fillArea: (q, r, color) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -550,7 +564,6 @@ export const useCanvasStore = create<CanvasStore>()(
       command.execute();
     },
 
-    // FIXED: Enhanced undo with batch command support
     undo: () => {
       const state = get();
       if (state.canUndo()) {
@@ -599,7 +612,6 @@ export const useCanvasStore = create<CanvasStore>()(
       }
     },
 
-    // FIXED: Enhanced redo with batch command support
     redo: () => {
       const state = get();
       if (state.canRedo()) {
