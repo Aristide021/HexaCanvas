@@ -22,36 +22,31 @@ export class TriangleGrid implements IGrid {
   }
 
   pixelToAxial(x: number, y: number): CellCoordinate {
-    const rFloat = y / this.triHeight;
-    const qFloat = x / (this.triWidth * 0.5);
-
-    let r = Math.round(rFloat);
-    let q = Math.round(qFloat);
-
-    const rDiff = Math.abs(r - rFloat);
-    const qDiff = Math.abs(q - qFloat);
+    const r = Math.round(y / this.triHeight);
+    const q = Math.round(x / (this.triWidth * 0.5));
     
-    // This is a simplified rounding for a staggered grid, which needs refinement.
-    // Let's use a more robust method by checking which region we are in.
-    const gridX = Math.floor(x / (this.triWidth / 2));
-    const gridY = Math.floor(y / this.triHeight);
+    // Convert back to pixel to find the center of the candidate cell
+    const centered = this.axialToPixel(q, r);
 
-    const relX = x - gridX * (this.triWidth / 2);
-    const relY = y - gridY * this.triHeight;
-    
-    const gradient = this.triHeight / (this.triWidth / 2);
+    // Get the vertices of this candidate cell
+    const vertices = this.getCellVertices(centered.x, centered.y);
 
-    if ((gridX + gridY) % 2 === 0) { // Downward pointing region
-      if (relY > (-gradient * relX) + this.triHeight) {
-        return { q: gridX, r: gridY + 1 };
-      }
-      return { q: gridX, r: gridY };
-    } else { // Upward pointing region
-      if (relY < (gradient * relX)) {
-        return { q: gridX, r: gridY };
-      }
-      return { q: gridX - 1, r: gridY };
+    // If the point is inside, we're done
+    if (this.pointInCell(x, y, centered.x, centered.y)) {
+      return { q, r };
     }
+
+    // If not, check its 3 neighbors to find the correct one
+    const neighbors = this.getNeighbors(q, r);
+    for (const neighbor of neighbors) {
+      const neighborCenter = this.axialToPixel(neighbor.q, neighbor.r);
+      if (this.pointInCell(x, y, neighborCenter.x, neighborCenter.y)) {
+        return neighbor;
+      }
+    }
+
+    // Fallback, though this should ideally not be reached
+    return { q, r };
   }
 
   getCellVertices(centerX: number, centerY: number): { x: number; y: number }[] {
@@ -83,9 +78,9 @@ export class TriangleGrid implements IGrid {
     const isUpward = (q + r) % 2 !== 0;
     
     if (isUpward) {
-      return [{ q: q - 1, r }, { q: q + 1, r }, { q: q, r: r - 1 }];
+      return [{ q: q - 1, r: r }, { q: q + 1, r: r }, { q: q, r: r - 1 }];
     } else {
-      return [{ q: q - 1, r }, { q: q + 1, r }, { q: q, r: r + 1 }];
+      return [{ q: q - 1, r: r }, { q: q + 1, r: r }, { q: q, r: r + 1 }];
     }
   }
 
