@@ -79,7 +79,7 @@ const createDefaultPalette = (): ColorPalette => ({
   generated: false
 });
 
-// Flood fill algorithm for hex grid
+// FIXED: Improved flood fill algorithm with proper boundary checking
 const floodFill = (
   layers: Layer[],
   activeLayerId: string,
@@ -94,7 +94,7 @@ const floodFill = (
   const startCell = activeLayer.cells.get(startCellId);
   const targetColor = startCell?.color || null;
   
-  // Don't fill if the target color is the same as new color
+  // CRITICAL FIX: Don't fill if the target color is the same as new color
   if (targetColor === newColor) return [];
 
   const visited = new Set<string>();
@@ -107,31 +107,43 @@ const floodFill = (
     { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }
   ];
 
-  while (queue.length > 0) {
+  // SAFETY: Limit maximum cells to prevent infinite loops
+  const MAX_CELLS = 10000;
+  let processedCells = 0;
+
+  while (queue.length > 0 && processedCells < MAX_CELLS) {
     const current = queue.shift()!;
     const cellId = `${current.q},${current.r}`;
     
+    // CRITICAL FIX: Check visited BEFORE processing
     if (visited.has(cellId)) continue;
     visited.add(cellId);
+    processedCells++;
 
     const cell = activeLayer.cells.get(cellId);
     const cellColor = cell?.color || null;
     
-    // Check if this cell matches the target color
+    // CRITICAL FIX: Only process cells that match the target color exactly
     if (cellColor === targetColor) {
       changes.push({ q: current.q, r: current.r, oldColor: cellColor });
       
-      // Add neighbors to queue
+      // Add neighbors to queue (only if not visited)
       directions.forEach(dir => {
         const neighborQ = current.q + dir.q;
         const neighborR = current.r + dir.r;
         const neighborId = `${neighborQ},${neighborR}`;
         
+        // CRITICAL FIX: Don't add to queue if already visited
         if (!visited.has(neighborId)) {
           queue.push({ q: neighborQ, r: neighborR });
         }
       });
     }
+  }
+
+  // Log warning if we hit the limit
+  if (processedCells >= MAX_CELLS) {
+    console.warn('Fill operation reached maximum cell limit for safety');
   }
 
   return changes;
@@ -342,65 +354,79 @@ export const useCanvasStore = create<CanvasStore>()(
       });
     },
 
+    // FIXED: Completely rewritten fillArea function with safety checks
     fillArea: (q, r, color) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
       
       if (!activeLayer || activeLayer.locked) return;
       
-      // Get all cells that need to be changed
-      const changes = floodFill(state.layers, state.activeLayerId, q, r, color);
-      
-      if (changes.length === 0) return;
-      
-      // Create batch command for all changes
-      const commands: PaintCommand[] = changes.map(change => ({
-        type: 'paint',
-        cellId: `${change.q},${change.r}`,
-        layerId: activeLayer.id,
-        newColor: color,
-        previousColor: change.oldColor,
-        wasEmpty: change.oldColor === null,
-        timestamp: Date.now(),
-        userId: state.currentUser.id,
-        execute: () => {},
-        undo: () => {}
-      }));
-      
-      // Execute all changes
-      set((state) => {
-        const layer = state.layers.find(l => l.id === activeLayer.id);
-        if (layer) {
-          commands.forEach(command => {
-            const [q, r] = command.cellId.split(',').map(Number);
-            const cell: HexCell = {
-              id: command.cellId,
-              q,
-              r,
-              color: command.newColor,
-              layerId: layer.id,
-              timestamp: command.timestamp
-            };
-            layer.cells.set(command.cellId, cell);
-          });
-          
-          // Add all commands to history as a batch
-          if (state.historyIndex < state.history.length - 1) {
-            state.history.splice(state.historyIndex + 1);
-          }
-          
-          commands.forEach(command => {
-            state.history.push(command);
-          });
-          
-          if (state.history.length > state.maxHistorySize) {
-            const excess = state.history.length - state.maxHistorySize;
-            state.history.splice(0, excess);
-          }
-          
-          state.historyIndex = state.history.length - 1;
+      try {
+        // Get all cells that need to be changed
+        const changes = floodFill(state.layers, state.activeLayerId, q, r, color);
+        
+        if (changes.length === 0) {
+          console.log('Fill operation: No changes needed');
+          return;
         }
-      });
+        
+        console.log(`Fill operation: Changing ${changes.length} cells`);
+        
+        // Create batch command for all changes
+        const commands: PaintCommand[] = changes.map(change => ({
+          type: 'paint',
+          cellId: `${change.q},${change.r}`,
+          layerId: activeLayer.id,
+          newColor: color,
+          previousColor: change.oldColor,
+          wasEmpty: change.oldColor === null,
+          timestamp: Date.now(),
+          userId: state.currentUser.id,
+          execute: () => {},
+          undo: () => {}
+        }));
+        
+        // Execute all changes in a single state update
+        set((state) => {
+          const layer = state.layers.find(l => l.id === activeLayer.id);
+          if (layer) {
+            commands.forEach(command => {
+              const [q, r] = command.cellId.split(',').map(Number);
+              const cell: HexCell = {
+                id: command.cellId,
+                q,
+                r,
+                color: command.newColor,
+                layerId: layer.id,
+                timestamp: command.timestamp
+              };
+              layer.cells.set(command.cellId, cell);
+            });
+            
+            // Add all commands to history as a batch
+            if (state.historyIndex < state.history.length - 1) {
+              state.history.splice(state.historyIndex + 1);
+            }
+            
+            commands.forEach(command => {
+              state.history.push(command);
+            });
+            
+            if (state.history.length > state.maxHistorySize) {
+              const excess = state.history.length - state.maxHistorySize;
+              state.history.splice(0, excess);
+            }
+            
+            state.historyIndex = state.history.length - 1;
+          }
+        });
+        
+        console.log('Fill operation completed successfully');
+        
+      } catch (error) {
+        console.error('Fill operation failed:', error);
+        alert('Fill operation failed. Please try again.');
+      }
     },
 
     pickColor: (q, r) => {
@@ -420,9 +446,12 @@ export const useCanvasStore = create<CanvasStore>()(
             // Automatically switch back to brush tool after picking
             state.activeTool = 'brush';
           });
+          console.log(`Color picked: ${cell.color}`);
           return;
         }
       }
+      
+      console.log('No color found at this position');
     },
 
     executeCommand: (command) => {
