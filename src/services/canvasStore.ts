@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { CanvasState, Layer, HexCell, Tool, ColorPalette, User, AnyCommand, PaintCommand, EraseCommand, BatchCommand } from '../types';
+import { CanvasState, Layer, HexCell, Tool, ColorPalette, User, AnyCommand, PaintCommand, EraseCommand, BatchCommand, GridType } from '../types';
 
 interface CanvasStore extends CanvasState {
   // Canvas state
@@ -23,11 +23,13 @@ interface CanvasStore extends CanvasState {
   activePaletteId: string;
   
   // Actions
-  addLayer: (name: string) => void;
+  addLayer: (name: string, gridType?: GridType) => void;
+  addPixelLayer: (name: string) => void;
   removeLayer: (layerId: string) => void;
   setActiveLayer: (layerId: string) => void;
   toggleLayerVisibility: (layerId: string) => void;
   updateLayerName: (layerId: string, name: string) => void;
+  setGlobalGridType: (gridType: GridType) => void;
   
   paintCell: (q: number, r: number, color: string) => void;
   eraseCell: (q: number, r: number) => void;
@@ -63,13 +65,14 @@ interface CanvasStore extends CanvasState {
   importCanvas: (data: string) => void;
 }
 
-const createDefaultLayer = (): Layer => ({
+const createDefaultLayer = (gridType: GridType = 'hexagon'): Layer => ({
   id: `layer-${Date.now()}`,
-  name: 'Layer 1',
+  name: gridType === 'pixel' ? 'Pixel Layer 1' : 'Shape Layer 1',
   visible: true,
   opacity: 1,
   locked: false,
-  cells: new Map()
+  cells: new Map(),
+  gridType // NEW: Each layer has its own grid type
 });
 
 const createDefaultPalette = (): ColorPalette => ({
@@ -156,13 +159,14 @@ const floodFill = (
 export const useCanvasStore = create<CanvasStore>()(
   immer((set, get) => ({
     // Initial state
-    layers: [createDefaultLayer()],
+    layers: [createDefaultLayer('hexagon')],
     activeLayerId: '',
     gridSize: 20,
     zoom: 1,
     panX: 0,
     panY: 0,
     showGrid: true,
+    globalGridType: 'hexagon', // NEW: Global grid type for shape layers
     selectedColor: '#FF5733',
     activeTool: 'brush',
     isPainting: false,
@@ -182,14 +186,30 @@ export const useCanvasStore = create<CanvasStore>()(
     palettes: [createDefaultPalette()],
     activePaletteId: 'default',
 
-    addLayer: (name) => set((state) => {
+    addLayer: (name, gridType = 'hexagon') => set((state) => {
       const newLayer: Layer = {
         id: `layer-${Date.now()}`,
         name,
         visible: true,
         opacity: 1,
         locked: false,
-        cells: new Map()
+        cells: new Map(),
+        gridType
+      };
+      state.layers.push(newLayer);
+      state.activeLayerId = newLayer.id;
+    }),
+
+    // NEW: Convenience method for adding pixel layers
+    addPixelLayer: (name) => set((state) => {
+      const newLayer: Layer = {
+        id: `layer-${Date.now()}`,
+        name,
+        visible: true,
+        opacity: 1,
+        locked: false,
+        cells: new Map(),
+        gridType: 'pixel'
       };
       state.layers.push(newLayer);
       state.activeLayerId = newLayer.id;
@@ -223,6 +243,11 @@ export const useCanvasStore = create<CanvasStore>()(
       if (layer) {
         layer.name = name;
       }
+    }),
+
+    // NEW: Set global grid type (affects all shape layers)
+    setGlobalGridType: (gridType) => set((state) => {
+      state.globalGridType = gridType;
     }),
 
     startPainting: () => set((state) => {
@@ -699,6 +724,7 @@ export const useCanvasStore = create<CanvasStore>()(
           ...layer,
           cells: Array.from(layer.cells.entries())
         })),
+        globalGridType: state.globalGridType,
         metadata: {
           version: '2.1.0',
           exported: Date.now()
@@ -712,9 +738,16 @@ export const useCanvasStore = create<CanvasStore>()(
         if (imported.layers) {
           state.layers = imported.layers.map((layer: any) => ({
             ...layer,
-            cells: new Map(layer.cells)
+            cells: new Map(layer.cells),
+            gridType: layer.gridType || 'hexagon' // Backward compatibility
           }));
           state.activeLayerId = state.layers[0]?.id || '';
+          
+          // Import global grid type if available
+          if (imported.globalGridType) {
+            state.globalGridType = imported.globalGridType;
+          }
+          
           // Clear history when importing
           state.history = [];
           state.historyIndex = -1;

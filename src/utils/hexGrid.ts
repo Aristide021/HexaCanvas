@@ -1,6 +1,6 @@
-import { CellCoordinate } from '../types';
+import { CellCoordinate, IGrid } from '../types';
 
-export class HexGrid {
+export class HexGrid implements IGrid {
   private size: number;
 
   constructor(size: number = 20) {
@@ -61,7 +61,7 @@ export class HexGrid {
   }
 
   // Check if point is inside hex cell bounds
-  pointInHex(x: number, y: number, hexX: number, hexY: number): boolean {
+  pointInCell(x: number, y: number, hexX: number, hexY: number): boolean {
     const dx = Math.abs(x - hexX);
     const dy = Math.abs(y - hexY);
     
@@ -70,8 +70,8 @@ export class HexGrid {
            dx * Math.sqrt(3) + dy <= this.size * Math.sqrt(3);
   }
 
-  // Get hex vertices for drawing
-  getHexVertices(centerX: number, centerY: number): { x: number; y: number }[] {
+  // Get hex vertices for drawing (renamed from getHexVertices for IGrid interface)
+  getCellVertices(centerX: number, centerY: number): { x: number; y: number }[] {
     const vertices = [];
     for (let i = 0; i < 6; i++) {
       const angle = i * Math.PI / 3;
@@ -81,6 +81,11 @@ export class HexGrid {
       });
     }
     return vertices;
+  }
+
+  // Legacy method for backward compatibility
+  getHexVertices(centerX: number, centerY: number): { x: number; y: number }[] {
+    return this.getCellVertices(centerX, centerY);
   }
 
   // Snap point to grid

@@ -13,6 +13,9 @@ export interface HexCell {
   timestamp: number;
 }
 
+// NEW: Grid type system for procedural grids
+export type GridType = 'hexagon' | 'triangle' | 'pixel';
+
 export interface Layer {
   id: string;
   name: string;
@@ -20,6 +23,7 @@ export interface Layer {
   opacity: number;
   locked: boolean;
   cells: Map<string, HexCell>;
+  gridType: GridType; // NEW: Each layer has its own grid type
 }
 
 export interface CanvasState {
@@ -30,6 +34,7 @@ export interface CanvasState {
   panX: number;
   panY: number;
   showGrid: boolean;
+  globalGridType: GridType; // NEW: Global grid type affects all shape layers
 }
 
 export interface Tool {
@@ -103,4 +108,16 @@ export interface Delta {
   payload: any;
   timestamp: number;
   userId: string;
+}
+
+// NEW: Grid interface for abstraction
+export interface IGrid {
+  axialToPixel(q: number, r: number): { x: number; y: number };
+  pixelToAxial(x: number, y: number): CellCoordinate;
+  getCellVertices(centerX: number, centerY: number): { x: number; y: number }[];
+  getNeighbors(q: number, r: number): CellCoordinate[];
+  pointInCell(x: number, y: number, cellX: number, cellY: number): boolean;
+  snapToGrid(x: number, y: number, threshold?: number): { x: number; y: number };
+  setSize(size: number): void;
+  getSize(): number;
 }
