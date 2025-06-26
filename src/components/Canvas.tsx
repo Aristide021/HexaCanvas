@@ -76,11 +76,13 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
   const drawHexGrid = (ctx: CanvasRenderingContext2D) => {
     const gridSize = hexGrid.getSize();
-    const visibleRadius = Math.max(width, height) / (zoom * gridSize) + 5;
+    // Calculate visible area based on current zoom and pan
+    const visibleRadius = Math.ceil(Math.max(width, height) / (zoom * gridSize * 2)) + 2;
     
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
 
+    // Draw grid centered around origin (0,0)
     for (let q = -visibleRadius; q <= visibleRadius; q++) {
       for (let r = Math.max(-visibleRadius, -q - visibleRadius); 
            r <= Math.min(visibleRadius, -q + visibleRadius); r++) {
