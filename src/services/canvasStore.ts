@@ -83,10 +83,11 @@ const createDefaultPalette = (): ColorPalette => ({
   generated: false
 });
 
-// Enhanced flood fill with proper hexagonal connectivity and performance optimization
+// Enhanced flood fill that works with different grid types
 const floodFill = (
   layers: Layer[],
   activeLayerId: string,
+  globalGridType: GridType,
   startQ: number,
   startR: number,
   newColor: string
@@ -105,17 +106,45 @@ const floodFill = (
   const toProcess = [{ q: startQ, r: startR }];
   const changes: Array<{ q: number; r: number; oldColor: string | null }> = [];
 
-  // Proper hexagonal neighbor directions (flat-top orientation)
-  const hexDirections = [
-    { q: 1, r: 0 },   // East
-    { q: 1, r: -1 },  // Northeast  
-    { q: 0, r: -1 },  // Northwest
-    { q: -1, r: 0 },  // West
-    { q: -1, r: 1 },  // Southwest
-    { q: 0, r: 1 }    // Southeast
-  ];
+  // Get neighbor directions based on grid type
+  const getNeighborDirections = (gridType: GridType, layerGridType: GridType) => {
+    // If it's a pixel layer, use pixel grid neighbors
+    if (layerGridType === 'pixel') {
+      return [
+        { q: 1, r: 0 },   // Right
+        { q: -1, r: 0 },  // Left
+        { q: 0, r: 1 },   // Down
+        { q: 0, r: -1 }   // Up
+      ];
+    }
+    
+    // For shape layers, use the global grid type
+    if (gridType === 'triangle') {
+      // Triangle neighbors depend on orientation
+      // We'll use a more comprehensive neighbor set for triangles
+      return [
+        { q: 1, r: 0 },   // Right
+        { q: -1, r: 0 },  // Left
+        { q: 0, r: 1 },   // Down
+        { q: 0, r: -1 },  // Up
+        { q: 1, r: 1 },   // Down-right
+        { q: -1, r: -1 }  // Up-left
+      ];
+    } else {
+      // Hexagon neighbors (default)
+      return [
+        { q: 1, r: 0 },   // East
+        { q: 1, r: -1 },  // Northeast  
+        { q: 0, r: -1 },  // Northwest
+        { q: -1, r: 0 },  // West
+        { q: -1, r: 1 },  // Southwest
+        { q: 0, r: 1 }    // Southeast
+      ];
+    }
+  };
 
-  const MAX_CELLS = 2000; // Optimized for better performance
+  const neighborDirections = getNeighborDirections(globalGridType, activeLayer.gridType);
+  const MAX_CELLS = 2000;
   let processedCells = 0;
 
   while (toProcess.length > 0 && processedCells < MAX_CELLS) {
@@ -137,7 +166,7 @@ const floodFill = (
       changes.push({ q: current.q, r: current.r, oldColor: cellColor });
       
       // Add valid neighbors to processing queue
-      hexDirections.forEach(dir => {
+      neighborDirections.forEach(dir => {
         const neighborQ = current.q + dir.q;
         const neighborR = current.r + dir.r;
         const neighborId = `${neighborQ},${neighborR}`;
@@ -249,15 +278,11 @@ export const useCanvasStore = create<CanvasStore>()(
       state.globalGridType = gridType;
     }),
 
-    // NEW: Rasterize layer functionality
     rasterizeLayer: (layerId) => set((state) => {
       const layer = state.layers.find(l => l.id === layerId);
       if (!layer || layer.gridType === 'pixel') return;
 
       // Convert the layer to a pixel layer
-      // For now, we'll keep the same cell data but change the grid type
-      // In a full implementation, you might want to actually render to a canvas
-      // and convert to pixel coordinates
       layer.gridType = 'pixel';
       layer.name = layer.name.replace('Shape', 'Pixel');
       
@@ -302,7 +327,7 @@ export const useCanvasStore = create<CanvasStore>()(
             execute: () => {},
             undo: () => {}
           });
-        } else { // command === 'erase'
+        } else {
           commands.push({
             type: 'erase',
             cellId,
@@ -316,7 +341,6 @@ export const useCanvasStore = create<CanvasStore>()(
         }
       });
       
-      // Create batch command for the entire stroke
       const batch: BatchCommand = {
         type: 'batch',
         name: command === 'paint' ? 'Brush Stroke' : 'Erase Stroke',
@@ -469,7 +493,7 @@ export const useCanvasStore = create<CanvasStore>()(
       if (!activeLayer || activeLayer.locked) return;
       
       try {
-        const changes = floodFill(state.layers, state.activeLayerId, q, r, color);
+        const changes = floodFill(state.layers, state.activeLayerId, state.globalGridType, q, r, color);
         
         if (changes.length === 0) {
           return;
@@ -751,16 +775,14 @@ export const useCanvasStore = create<CanvasStore>()(
           state.layers = imported.layers.map((layer: any) => ({
             ...layer,
             cells: new Map(layer.cells),
-            gridType: layer.gridType || 'hexagon' // Backward compatibility
+            gridType: layer.gridType || 'hexagon'
           }));
           state.activeLayerId = state.layers[0]?.id || '';
           
-          // Import global grid type if available
           if (imported.globalGridType) {
             state.globalGridType = imported.globalGridType;
           }
           
-          // Clear history when importing
           state.history = [];
           state.historyIndex = -1;
         }
