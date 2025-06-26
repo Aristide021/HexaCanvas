@@ -174,6 +174,7 @@ export const useCanvasStore = create<CanvasStore>()(
       // Don't paint if the color is the same
       if (existingCell && existingCell.color === color) return;
       
+      // Create the command with proper execution logic
       const command: PaintCommand = {
         type: 'paint',
         cellId,
@@ -184,45 +185,44 @@ export const useCanvasStore = create<CanvasStore>()(
         timestamp: Date.now(),
         userId: state.currentUser.id,
         execute: () => {
-          set((state) => {
-            const layer = state.layers.find(l => l.id === command.layerId);
-            if (layer) {
-              const cell: HexCell = {
-                id: cellId,
-                q,
-                r,
-                color: command.newColor,
-                layerId: layer.id,
-                timestamp: command.timestamp
-              };
-              layer.cells.set(cellId, cell);
-              state.lastPaintedCell = cellId;
-            }
-          });
+          // This will be called by executeCommand
         },
         undo: () => {
-          set((state) => {
-            const layer = state.layers.find(l => l.id === command.layerId);
-            if (layer) {
-              if (command.wasEmpty) {
-                layer.cells.delete(cellId);
-              } else if (command.previousColor) {
-                const cell: HexCell = {
-                  id: cellId,
-                  q,
-                  r,
-                  color: command.previousColor,
-                  layerId: layer.id,
-                  timestamp: Date.now()
-                };
-                layer.cells.set(cellId, cell);
-              }
-            }
-          });
+          // This will be called by the undo system
         }
       };
       
-      state.executeCommand(command);
+      // Execute immediately and add to history
+      set((state) => {
+        const layer = state.layers.find(l => l.id === command.layerId);
+        if (layer) {
+          const cell: HexCell = {
+            id: cellId,
+            q,
+            r,
+            color: command.newColor,
+            layerId: layer.id,
+            timestamp: command.timestamp
+          };
+          layer.cells.set(cellId, cell);
+          state.lastPaintedCell = cellId;
+          
+          // Add to history
+          if (state.historyIndex < state.history.length - 1) {
+            state.history.splice(state.historyIndex + 1);
+          }
+          
+          state.history.push(command);
+          
+          if (state.history.length > state.maxHistorySize) {
+            state.history.shift();
+          } else {
+            state.historyIndex++;
+          }
+          
+          state.historyIndex = state.history.length - 1;
+        }
+      });
     },
 
     eraseCell: (q, r) => {
@@ -247,64 +247,85 @@ export const useCanvasStore = create<CanvasStore>()(
         timestamp: Date.now(),
         userId: state.currentUser.id,
         execute: () => {
-          set((state) => {
-            const layer = state.layers.find(l => l.id === command.layerId);
-            if (layer) {
-              layer.cells.delete(cellId);
-              state.lastPaintedCell = cellId;
-            }
-          });
+          // This will be called by executeCommand
         },
         undo: () => {
-          set((state) => {
-            const layer = state.layers.find(l => l.id === command.layerId);
-            if (layer) {
-              const cell: HexCell = {
-                id: cellId,
-                q,
-                r,
-                color: command.previousColor,
-                layerId: layer.id,
-                timestamp: Date.now()
-              };
-              layer.cells.set(cellId, cell);
-            }
-          });
+          // This will be called by the undo system
         }
       };
       
-      state.executeCommand(command);
+      // Execute immediately and add to history
+      set((state) => {
+        const layer = state.layers.find(l => l.id === command.layerId);
+        if (layer) {
+          layer.cells.delete(cellId);
+          state.lastPaintedCell = cellId;
+          
+          // Add to history
+          if (state.historyIndex < state.history.length - 1) {
+            state.history.splice(state.historyIndex + 1);
+          }
+          
+          state.history.push(command);
+          
+          if (state.history.length > state.maxHistorySize) {
+            state.history.shift();
+          } else {
+            state.historyIndex++;
+          }
+          
+          state.historyIndex = state.history.length - 1;
+        }
+      });
     },
 
-    executeCommand: (command) => set((state) => {
-      // Execute the command
+    executeCommand: (command) => {
+      // This method is kept for potential future use but not needed for basic paint/erase
       command.execute();
-      
-      // Add to history
-      if (state.historyIndex < state.history.length - 1) {
-        // Remove any commands after current index
-        state.history.splice(state.historyIndex + 1);
-      }
-      
-      state.history.push(command);
-      
-      // Limit history size
-      if (state.history.length > state.maxHistorySize) {
-        state.history.shift();
-      } else {
-        state.historyIndex++;
-      }
-      
-      // Ensure historyIndex is correct
-      state.historyIndex = state.history.length - 1;
-    }),
+    },
 
     undo: () => {
       const state = get();
       if (state.canUndo()) {
         const command = state.history[state.historyIndex];
-        command.undo();
+        
         set((state) => {
+          if (command.type === 'paint') {
+            const paintCmd = command as PaintCommand;
+            const layer = state.layers.find(l => l.id === paintCmd.layerId);
+            if (layer) {
+              if (paintCmd.wasEmpty) {
+                layer.cells.delete(paintCmd.cellId);
+              } else if (paintCmd.previousColor) {
+                const [q, r] = paintCmd.cellId.split(',').map(Number);
+                const cell: HexCell = {
+                  id: paintCmd.cellId,
+                  q,
+                  r,
+                  color: paintCmd.previousColor,
+                  layerId: layer.id,
+                  timestamp: Date.now()
+                };
+                layer.cells.set(paintCmd.cellId, cell);
+              }
+            }
+          } else if (command.type === 'erase') {
+            const eraseCmd = command as EraseCommand;
+            const layer = state.layers.find(l => l.id === eraseCmd.layerId);
+            if (layer) {
+              const [q, r] = eraseCmd.cellId.split(',').map(Number);
+              const cell: HexCell = {
+                id: eraseCmd.cellId,
+                q,
+                r,
+                color: eraseCmd.previousColor,
+                layerId: layer.id,
+                timestamp: Date.now()
+              };
+              layer.cells.set(eraseCmd.cellId, cell);
+            }
+          }
+          
           state.historyIndex--;
         });
       }
@@ -316,8 +337,33 @@ export const useCanvasStore = create<CanvasStore>()(
         set((state) => {
           state.historyIndex++;
         });
+        
         const command = state.history[state.historyIndex];
-        command.execute();
+        
+        set((state) => {
+          if (command.type === 'paint') {
+            const paintCmd = command as PaintCommand;
+            const layer = state.layers.find(l => l.id === paintCmd.layerId);
+            if (layer) {
+              const [q, r] = paintCmd.cellId.split(',').map(Number);
+              const cell: HexCell = {
+                id: paintCmd.cellId,
+                q,
+                r,
+                color: paintCmd.newColor,
+                layerId: layer.id,
+                timestamp: paintCmd.timestamp
+              };
+              layer.cells.set(paintCmd.cellId, cell);
+            }
+          } else if (command.type === 'erase') {
+            const eraseCmd = command as EraseCommand;
+            const layer = state.layers.find(l => l.id === eraseCmd.layerId);
+            if (layer) {
+              layer.cells.delete(eraseCmd.cellId);
+            }
+          }
+        });
       }
     },
 
