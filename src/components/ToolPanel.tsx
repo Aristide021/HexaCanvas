@@ -1,13 +1,15 @@
 import React from 'react';
-import { Paintbrush, Eraser, Move, RotateCcw, RotateCw, Grid, ZoomIn, ZoomOut } from 'lucide-react';
+import { Paintbrush, Eraser, Move, RotateCcw, RotateCw, Grid, ZoomIn, ZoomOut, Pipette, PaintBucket } from 'lucide-react';
 import { useCanvasStore } from '../services/canvasStore';
 import { PanelWrapper } from './ui/PanelWrapper';
 import { ToolButton } from './ui/ToolButton';
 
 const tools = [
-  { id: 'brush', name: 'Brush', icon: Paintbrush },
-  { id: 'eraser', name: 'Eraser', icon: Eraser },
-  { id: 'move', name: 'Move', icon: Move },
+  { id: 'brush', name: 'Brush', icon: Paintbrush, tooltip: 'Paint cells with selected color' },
+  { id: 'eraser', name: 'Eraser', icon: Eraser, tooltip: 'Remove cells' },
+  { id: 'picker', name: 'Picker', icon: Pipette, tooltip: 'Pick color from canvas' },
+  { id: 'fill', name: 'Fill', icon: PaintBucket, tooltip: 'Fill connected area' },
+  { id: 'move', name: 'Move', icon: Move, tooltip: 'Pan the canvas' },
 ];
 
 export const ToolPanel: React.FC = () => {
@@ -27,7 +29,7 @@ export const ToolPanel: React.FC = () => {
   return (
     <PanelWrapper title="Tools">
       {/* Main Tools */}
-      <div className="grid grid-cols-3 gap-2 mb-6">
+      <div className="grid grid-cols-2 gap-2 mb-6">
         {tools.map((tool) => (
           <ToolButton
             key={tool.id}
@@ -36,6 +38,7 @@ export const ToolPanel: React.FC = () => {
             icon={tool.icon}
             active={activeTool === tool.id}
             onClick={() => setActiveTool(tool.id)}
+            tooltip={tool.tooltip}
           />
         ))}
       </div>
@@ -103,8 +106,19 @@ export const ToolPanel: React.FC = () => {
         </button>
       </div>
 
+      {/* Tool Tips */}
+      <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+        <h5 className="text-xs font-semibold text-blue-700 mb-2">💡 Tool Tips</h5>
+        <ul className="text-xs text-blue-600 space-y-1">
+          <li>• <strong>Picker:</strong> Click to sample colors</li>
+          <li>• <strong>Fill:</strong> Flood fill connected areas</li>
+          <li>• <strong>Space+Drag:</strong> Pan the canvas</li>
+          <li>• <strong>Mouse Wheel:</strong> Zoom in/out</li>
+        </ul>
+      </div>
+
       {/* Zoom Level Display */}
-      <div className="text-center">
+      <div className="text-center mt-4">
         <span className="text-xs text-gray-500 font-mono">
           Zoom: {Math.round(zoom * 100)}%
         </span>

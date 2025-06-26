@@ -12,6 +12,7 @@ interface CanvasProps {
 export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [hoverCell, setHoverCell] = useState<{ q: number; r: number } | null>(null);
   const panOffset = useRef({ x: 0, y: 0 });
 
   const {
@@ -27,6 +28,8 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     gridSize,
     paintCell,
     eraseCell,
+    fillArea,
+    pickColor,
     startPainting,
     stopPainting,
     setPan,
@@ -91,6 +94,12 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       }
     });
 
+    // Draw hover preview
+    if (hoverCell && (activeTool === 'brush' || activeTool === 'eraser')) {
+      ctx.globalAlpha = 0.5;
+      drawHoverPreview(ctx, hoverCell.q, hoverCell.r);
+    }
+
     // Draw user cursors
     ctx.globalAlpha = 1;
     users.forEach(user => {
@@ -102,7 +111,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.restore();
   }, [
     width, height, layers, zoom, panX, panY, showGrid, 
-    users, currentUser, grid, visibleCells
+    users, currentUser, grid, visibleCells, hoverCell, activeTool, selectedColor
   ]);
 
   const drawHexGrid = useCallback((ctx: CanvasRenderingContext2D) => {
@@ -152,6 +161,54 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.stroke();
   }, [grid, zoom]);
 
+  const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number) => {
+    const { x, y } = grid.axialToPixel(q, r);
+    const vertices = grid.getHexVertices(x, y);
+    
+    if (activeTool === 'brush') {
+      // Show brush preview with selected color
+      ctx.fillStyle = selectedColor;
+      ctx.beginPath();
+      ctx.moveTo(vertices[0].x, vertices[0].y);
+      
+      for (let i = 1; i < vertices.length; i++) {
+        ctx.lineTo(vertices[i].x, vertices[i].y);
+      }
+      
+      ctx.closePath();
+      ctx.fill();
+    } else if (activeTool === 'eraser') {
+      // Show eraser preview with red outline
+      ctx.strokeStyle = '#FF4444';
+      ctx.lineWidth = 2 / zoom;
+      ctx.setLineDash([5 / zoom, 5 / zoom]);
+      
+      ctx.beginPath();
+      ctx.moveTo(vertices[0].x, vertices[0].y);
+      
+      for (let i = 1; i < vertices.length; i++) {
+        ctx.lineTo(vertices[i].x, vertices[i].y);
+      }
+      
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Add outline for all tools
+    ctx.strokeStyle = activeTool === 'picker' ? '#10B981' : '#3B82F6';
+    ctx.lineWidth = 2 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(vertices[0].x, vertices[0].y);
+    
+    for (let i = 1; i < vertices.length; i++) {
+      ctx.lineTo(vertices[i].x, vertices[i].y);
+    }
+    
+    ctx.closePath();
+    ctx.stroke();
+  }, [grid, zoom, activeTool, selectedColor]);
+
   const drawUserCursor = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, color: string, name: string) => {
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -186,6 +243,18 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       const { x, y } = getMousePos(e);
       const axial = grid.pixelToAxial(x, y);
       
+      if (activeTool === 'picker') {
+        // Color picker tool
+        pickColor(axial.q, axial.r);
+        return;
+      }
+
+      if (activeTool === 'fill') {
+        // Fill tool
+        fillArea(axial.q, axial.r, selectedColor);
+        return;
+      }
+      
       startPainting();
       
       if (activeTool === 'brush') {
@@ -194,10 +263,16 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         eraseCell(axial.q, axial.r);
       }
     }
-  }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, startPainting, panX, panY]);
+  }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
 
   // Throttled mouse move for performance
   const handleMouseMove = useMemo(() => throttle((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = getMousePos(e);
+    const axial = grid.pixelToAxial(x, y);
+    
+    // Update hover cell for preview
+    setHoverCell({ q: axial.q, r: axial.r });
+
     if (isDragging) {
       const newPanX = e.clientX - panOffset.current.x;
       const newPanY = e.clientY - panOffset.current.y;
@@ -206,10 +281,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     }
 
     // Continue painting/erasing while dragging
-    if (isPainting) {
-      const { x, y } = getMousePos(e);
-      const axial = grid.pixelToAxial(x, y);
-      
+    if (isPainting && (activeTool === 'brush' || activeTool === 'eraser')) {
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
       } else if (activeTool === 'eraser') {
@@ -218,11 +290,16 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     }
 
     // Update cursor position for collaboration
-    const { x, y } = getMousePos(e);
     // In a real app, this would broadcast cursor position to other users
   }, 16), [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]);
 
   const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    stopPainting();
+  }, [stopPainting]);
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverCell(null);
     setIsDragging(false);
     stopPainting();
   }, [stopPainting]);
@@ -270,18 +347,39 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     };
   }, []);
 
+  // Dynamic cursor based on active tool
+  const getCursorStyle = () => {
+    switch (activeTool) {
+      case 'brush':
+        return 'crosshair';
+      case 'eraser':
+        return 'crosshair';
+      case 'picker':
+        return 'crosshair';
+      case 'fill':
+        return 'crosshair';
+      case 'move':
+        return isDragging ? 'grabbing' : 'grab';
+      default:
+        return 'crosshair';
+    }
+  };
+
   return (
     <canvas
       ref={canvasRef}
       width={width}
       height={height}
-      className="border border-gray-300 cursor-crosshair rounded-lg shadow-inner"
+      className="border border-gray-300 rounded-lg shadow-inner"
+      style={{ 
+        touchAction: 'none',
+        cursor: getCursorStyle()
+      }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
       onWheel={handleWheel}
-      style={{ touchAction: 'none' }}
     />
   );
 };

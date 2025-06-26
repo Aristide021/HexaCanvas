@@ -31,6 +31,8 @@ interface CanvasStore extends CanvasState {
   
   paintCell: (q: number, r: number, color: string) => void;
   eraseCell: (q: number, r: number) => void;
+  fillArea: (q: number, r: number, color: string) => void;
+  pickColor: (q: number, r: number) => void;
   startPainting: () => void;
   stopPainting: () => void;
   
@@ -76,6 +78,64 @@ const createDefaultPalette = (): ColorPalette => ({
   colors: ['#FF5733', '#C70039', '#900C3F', '#581845', '#273746', '#1ABC9C', '#3498DB', '#9B59B6'],
   generated: false
 });
+
+// Flood fill algorithm for hex grid
+const floodFill = (
+  layers: Layer[],
+  activeLayerId: string,
+  startQ: number,
+  startR: number,
+  newColor: string
+): Array<{ q: number; r: number; oldColor: string | null }> => {
+  const activeLayer = layers.find(l => l.id === activeLayerId);
+  if (!activeLayer) return [];
+
+  const startCellId = `${startQ},${startR}`;
+  const startCell = activeLayer.cells.get(startCellId);
+  const targetColor = startCell?.color || null;
+  
+  // Don't fill if the target color is the same as new color
+  if (targetColor === newColor) return [];
+
+  const visited = new Set<string>();
+  const queue: Array<{ q: number; r: number }> = [{ q: startQ, r: startR }];
+  const changes: Array<{ q: number; r: number; oldColor: string | null }> = [];
+
+  // Hex directions for neighbors
+  const directions = [
+    { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
+    { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }
+  ];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const cellId = `${current.q},${current.r}`;
+    
+    if (visited.has(cellId)) continue;
+    visited.add(cellId);
+
+    const cell = activeLayer.cells.get(cellId);
+    const cellColor = cell?.color || null;
+    
+    // Check if this cell matches the target color
+    if (cellColor === targetColor) {
+      changes.push({ q: current.q, r: current.r, oldColor: cellColor });
+      
+      // Add neighbors to queue
+      directions.forEach(dir => {
+        const neighborQ = current.q + dir.q;
+        const neighborR = current.r + dir.r;
+        const neighborId = `${neighborQ},${neighborR}`;
+        
+        if (!visited.has(neighborId)) {
+          queue.push({ q: neighborQ, r: neighborR });
+        }
+      });
+    }
+  }
+
+  return changes;
+};
 
 export const useCanvasStore = create<CanvasStore>()(
   immer((set, get) => ({
@@ -280,6 +340,89 @@ export const useCanvasStore = create<CanvasStore>()(
           state.historyIndex = state.history.length - 1;
         }
       });
+    },
+
+    fillArea: (q, r, color) => {
+      const state = get();
+      const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+      
+      if (!activeLayer || activeLayer.locked) return;
+      
+      // Get all cells that need to be changed
+      const changes = floodFill(state.layers, state.activeLayerId, q, r, color);
+      
+      if (changes.length === 0) return;
+      
+      // Create batch command for all changes
+      const commands: PaintCommand[] = changes.map(change => ({
+        type: 'paint',
+        cellId: `${change.q},${change.r}`,
+        layerId: activeLayer.id,
+        newColor: color,
+        previousColor: change.oldColor,
+        wasEmpty: change.oldColor === null,
+        timestamp: Date.now(),
+        userId: state.currentUser.id,
+        execute: () => {},
+        undo: () => {}
+      }));
+      
+      // Execute all changes
+      set((state) => {
+        const layer = state.layers.find(l => l.id === activeLayer.id);
+        if (layer) {
+          commands.forEach(command => {
+            const [q, r] = command.cellId.split(',').map(Number);
+            const cell: HexCell = {
+              id: command.cellId,
+              q,
+              r,
+              color: command.newColor,
+              layerId: layer.id,
+              timestamp: command.timestamp
+            };
+            layer.cells.set(command.cellId, cell);
+          });
+          
+          // Add all commands to history as a batch
+          if (state.historyIndex < state.history.length - 1) {
+            state.history.splice(state.historyIndex + 1);
+          }
+          
+          commands.forEach(command => {
+            state.history.push(command);
+          });
+          
+          if (state.history.length > state.maxHistorySize) {
+            const excess = state.history.length - state.maxHistorySize;
+            state.history.splice(0, excess);
+          }
+          
+          state.historyIndex = state.history.length - 1;
+        }
+      });
+    },
+
+    pickColor: (q, r) => {
+      const state = get();
+      
+      // Find the topmost visible cell at this position
+      for (let i = state.layers.length - 1; i >= 0; i--) {
+        const layer = state.layers[i];
+        if (!layer.visible) continue;
+        
+        const cellId = `${q},${r}`;
+        const cell = layer.cells.get(cellId);
+        
+        if (cell) {
+          set((state) => {
+            state.selectedColor = cell.color;
+            // Automatically switch back to brush tool after picking
+            state.activeTool = 'brush';
+          });
+          return;
+        }
+      }
     },
 
     executeCommand: (command) => {

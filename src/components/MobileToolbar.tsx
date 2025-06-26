@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Paintbrush, Palette, Layers, Settings, X } from 'lucide-react';
+import { Paintbrush, Palette, Layers, Settings, X, Eraser, Pipette, PaintBucket } from 'lucide-react';
 import { useCanvasStore } from '../services/canvasStore';
 import { ColorPalette } from './ColorPalette';
 import { LayerPanel } from './LayerPanel';
@@ -11,7 +11,9 @@ export const MobileToolbar: React.FC = () => {
 
   const tools = [
     { id: 'brush', icon: Paintbrush, label: 'Brush' },
-    { id: 'eraser', icon: Paintbrush, label: 'Eraser' },
+    { id: 'eraser', icon: Eraser, label: 'Eraser' },
+    { id: 'picker', icon: Pipette, label: 'Picker' },
+    { id: 'fill', icon: PaintBucket, label: 'Fill' },
   ];
 
   const panels = [
@@ -35,14 +37,14 @@ export const MobileToolbar: React.FC = () => {
                 key={tool.id}
                 onClick={() => setActiveTool(tool.id)}
                 className={`
-                  p-3 rounded-lg transition-colors flex flex-col items-center gap-1
+                  p-2 rounded-lg transition-colors flex flex-col items-center gap-1
                   ${activeTool === tool.id
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-100'
                   }
                 `}
               >
-                <Icon size={20} />
+                <Icon size={18} />
                 <span className="text-xs">{tool.label}</span>
               </button>
             );
@@ -51,7 +53,7 @@ export const MobileToolbar: React.FC = () => {
           {/* Color Indicator */}
           <div className="flex flex-col items-center gap-1">
             <div
-              className="w-8 h-8 rounded-lg border-2 border-gray-300"
+              className="w-6 h-6 rounded-lg border-2 border-gray-300"
               style={{ backgroundColor: selectedColor }}
             />
             <span className="text-xs text-gray-600">Color</span>
@@ -65,14 +67,14 @@ export const MobileToolbar: React.FC = () => {
                 key={panel.id}
                 onClick={() => setActivePanel(activePanel === panel.id ? null : panel.id)}
                 className={`
-                  p-3 rounded-lg transition-colors flex flex-col items-center gap-1
+                  p-2 rounded-lg transition-colors flex flex-col items-center gap-1
                   ${activePanel === panel.id
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-100'
                   }
                 `}
               >
-                <Icon size={20} />
+                <Icon size={18} />
                 <span className="text-xs">{panel.label}</span>
               </button>
             );
