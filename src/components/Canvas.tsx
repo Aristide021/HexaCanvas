@@ -283,8 +283,8 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     }
   }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
 
-  // FIXED: Reduced throttle delay for smoother brush strokes
-  const handleMouseMove = useMemo(() => throttle((e: React.MouseEvent<HTMLCanvasElement>) => {
+  // CRITICAL FIX: Completely remove throttling for mouse move during painting
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getMousePos(e);
     const axial = grid.pixelToAxial(x, y);
     
@@ -298,7 +298,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       return;
     }
 
-    // FIXED: Continue painting/erasing while dragging with better responsiveness
+    // CRITICAL FIX: Direct painting without throttling during drag
     if (isPainting && (activeTool === 'brush' || activeTool === 'eraser')) {
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
@@ -306,10 +306,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         eraseCell(axial.q, axial.r);
       }
     }
-
-    // Update cursor position for collaboration
-    // In a real app, this would broadcast cursor position to other users
-  }, 8), [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]); // Reduced from 16ms to 8ms
+  }, [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);

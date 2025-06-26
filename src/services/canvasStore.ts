@@ -7,7 +7,6 @@ interface CanvasStore extends CanvasState {
   selectedColor: string;
   activeTool: string;
   isPainting: boolean;
-  lastPaintedCell: string | null;
   
   // History system
   history: AnyCommand[];
@@ -167,7 +166,6 @@ export const useCanvasStore = create<CanvasStore>()(
     selectedColor: '#FF5733',
     activeTool: 'brush',
     isPainting: false,
-    lastPaintedCell: null,
     
     // History
     history: [],
@@ -228,15 +226,13 @@ export const useCanvasStore = create<CanvasStore>()(
 
     startPainting: () => set((state) => {
       state.isPainting = true;
-      state.lastPaintedCell = null;
     }),
 
     stopPainting: () => set((state) => {
       state.isPainting = false;
-      state.lastPaintedCell = null;
     }),
 
-    // FIXED: Improved paintCell with better drag handling
+    // CRITICAL FIX: Completely removed lastPaintedCell tracking for smooth dragging
     paintCell: (q, r, color) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -244,20 +240,15 @@ export const useCanvasStore = create<CanvasStore>()(
       if (!activeLayer || activeLayer.locked) return;
       
       const cellId = `${q},${r}`;
+      const existingCell = activeLayer.cells.get(cellId);
       
-      // CRITICAL FIX: Only prevent repeat painting during continuous drag, not discrete clicks
-      if (state.isPainting && state.lastPaintedCell === cellId) {
+      // Don't paint if the color is the same (optimization)
+      if (existingCell && existingCell.color === color) {
         return;
       }
       
-      const existingCell = activeLayer.cells.get(cellId);
       const wasEmpty = !existingCell;
       const previousColor = existingCell?.color;
-      
-      // Don't paint if the color is the same (but allow during drag for consistency)
-      if (existingCell && existingCell.color === color && !state.isPainting) {
-        return;
-      }
       
       // Create the command with proper execution logic
       const command: PaintCommand = {
@@ -273,7 +264,7 @@ export const useCanvasStore = create<CanvasStore>()(
         undo: () => {}
       };
       
-      // Execute immediately and add to history
+      // Execute immediately and add to history only for discrete actions
       set((state) => {
         const layer = state.layers.find(l => l.id === command.layerId);
         if (layer) {
@@ -286,10 +277,9 @@ export const useCanvasStore = create<CanvasStore>()(
             timestamp: command.timestamp
           };
           layer.cells.set(cellId, cell);
-          state.lastPaintedCell = cellId;
           
-          // Only add to history if not painting continuously or if it's a new cell
-          if (!state.isPainting || state.lastPaintedCell !== cellId) {
+          // Only add to history if not painting continuously (for undo/redo efficiency)
+          if (!state.isPainting) {
             // Add to history
             if (state.historyIndex < state.history.length - 1) {
               state.history.splice(state.historyIndex + 1);
@@ -309,7 +299,7 @@ export const useCanvasStore = create<CanvasStore>()(
       });
     },
 
-    // FIXED: Improved eraseCell with better drag handling
+    // CRITICAL FIX: Completely removed lastPaintedCell tracking for smooth erasing
     eraseCell: (q, r) => {
       const state = get();
       const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -320,11 +310,6 @@ export const useCanvasStore = create<CanvasStore>()(
       const existingCell = activeLayer.cells.get(cellId);
       
       if (!existingCell) return;
-      
-      // CRITICAL FIX: Only prevent repeat erasing during continuous drag
-      if (state.isPainting && state.lastPaintedCell === cellId) {
-        return;
-      }
       
       const command: EraseCommand = {
         type: 'erase',
@@ -337,15 +322,14 @@ export const useCanvasStore = create<CanvasStore>()(
         undo: () => {}
       };
       
-      // Execute immediately and add to history
+      // Execute immediately and add to history only for discrete actions
       set((state) => {
         const layer = state.layers.find(l => l.id === command.layerId);
         if (layer) {
           layer.cells.delete(cellId);
-          state.lastPaintedCell = cellId;
           
-          // Only add to history if not painting continuously or if it's a new cell
-          if (!state.isPainting || state.lastPaintedCell !== cellId) {
+          // Only add to history if not painting continuously (for undo/redo efficiency)
+          if (!state.isPainting) {
             // Add to history
             if (state.historyIndex < state.history.length - 1) {
               state.history.splice(state.historyIndex + 1);
