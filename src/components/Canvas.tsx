@@ -1,6 +1,8 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useCanvasStore } from '../services/canvasStore';
-import { HexGrid } from '../utils/hexGrid';
+import { useHexGrid } from '../hooks/useHexGrid';
+import { throttle } from '../utils/performance';
+import { calculateViewportBounds, isCellInViewport } from '../utils/performance';
 
 interface CanvasProps {
   width: number;
@@ -9,7 +11,7 @@ interface CanvasProps {
 
 export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [hexGrid] = useState(() => new HexGrid(20));
+  const { grid } = useHexGrid(20);
   const [isDragging, setIsDragging] = useState(false);
   const panOffset = useRef({ x: 0, y: 0 });
 
@@ -30,7 +32,25 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     currentUser
   } = useCanvasStore();
 
-  // FIX #1: Complete dependency array for draw function
+  // Calculate viewport bounds for performance optimization
+  const viewportBounds = useMemo(() => 
+    calculateViewportBounds(width, height, zoom, panX, panY, grid.getSize()),
+    [width, height, zoom, panX, panY, grid]
+  );
+
+  // Filter visible cells for performance
+  const visibleCells = useMemo(() => {
+    const cells: Array<{ q: number; r: number; color: string; layerId: string }> = [];
+    layers.filter(layer => layer.visible).forEach(layer => {
+      layer.cells.forEach(cell => {
+        if (isCellInViewport(cell.q, cell.r, viewportBounds)) {
+          cells.push(cell);
+        }
+      });
+    });
+    return cells;
+  }, [layers, viewportBounds]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -51,12 +71,13 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       drawHexGrid(ctx);
     }
 
-    // Draw layers
-    layers.filter(layer => layer.visible).forEach(layer => {
-      ctx.globalAlpha = layer.opacity;
-      layer.cells.forEach(cell => {
+    // Draw visible cells only (performance optimization)
+    visibleCells.forEach(cell => {
+      const layer = layers.find(l => l.id === cell.layerId);
+      if (layer) {
+        ctx.globalAlpha = layer.opacity;
         drawHexCell(ctx, cell.q, cell.r, cell.color);
-      });
+      }
     });
 
     // Draw user cursors
@@ -69,25 +90,22 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
     ctx.restore();
   }, [
-    // FIX #1: Include ALL dependencies that draw function uses
     width, height, layers, zoom, panX, panY, showGrid, 
-    users, currentUser, hexGrid
+    users, currentUser, grid, visibleCells
   ]);
 
-  const drawHexGrid = (ctx: CanvasRenderingContext2D) => {
-    const gridSize = hexGrid.getSize();
-    // Calculate visible area based on current zoom and pan
+  const drawHexGrid = useCallback((ctx: CanvasRenderingContext2D) => {
+    const gridSize = grid.getSize();
     const visibleRadius = Math.ceil(Math.max(width, height) / (zoom * gridSize * 2)) + 2;
     
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
 
-    // Draw grid centered around origin (0,0)
     for (let q = -visibleRadius; q <= visibleRadius; q++) {
       for (let r = Math.max(-visibleRadius, -q - visibleRadius); 
            r <= Math.min(visibleRadius, -q + visibleRadius); r++) {
-        const { x, y } = hexGrid.axialToPixel(q, r);
-        const vertices = hexGrid.getHexVertices(x, y);
+        const { x, y } = grid.axialToPixel(q, r);
+        const vertices = grid.getHexVertices(x, y);
         
         ctx.beginPath();
         ctx.moveTo(vertices[0].x, vertices[0].y);
@@ -100,11 +118,11 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         ctx.stroke();
       }
     }
-  };
+  }, [grid, width, height, zoom]);
 
-  const drawHexCell = (ctx: CanvasRenderingContext2D, q: number, r: number, color: string) => {
-    const { x, y } = hexGrid.axialToPixel(q, r);
-    const vertices = hexGrid.getHexVertices(x, y);
+  const drawHexCell = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number, color: string) => {
+    const { x, y } = grid.axialToPixel(q, r);
+    const vertices = grid.getHexVertices(x, y);
     
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -121,9 +139,9 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
     ctx.stroke();
-  };
+  }, [grid, zoom]);
 
-  const drawUserCursor = (ctx: CanvasRenderingContext2D, x: number, y: number, color: string, name: string) => {
+  const drawUserCursor = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, color: string, name: string) => {
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(x, y, 5 / zoom, 0, Math.PI * 2);
@@ -132,9 +150,9 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
     ctx.font = `${12 / zoom}px Arial`;
     ctx.fillText(name, x + 8 / zoom, y - 8 / zoom);
-  };
+  }, [zoom]);
 
-  const getMousePos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getMousePos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
 
@@ -143,12 +161,10 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     const y = ((e.clientY - rect.top - height / 2 - panY) / zoom);
     
     return { x, y };
-  };
+  }, [width, height, panX, panY, zoom]);
 
-  // FIX #2: Improved panning with useRef to avoid stale state
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
-      // Middle mouse or Alt+click for panning
       setIsDragging(true);
       panOffset.current = { x: e.clientX - panX, y: e.clientY - panY };
       return;
@@ -156,7 +172,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
     if (e.button === 0) {
       const { x, y } = getMousePos(e);
-      const axial = hexGrid.pixelToAxial(x, y);
+      const axial = grid.pixelToAxial(x, y);
       
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
@@ -164,10 +180,10 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         eraseCell(axial.q, axial.r);
       }
     }
-  };
+  }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, panX, panY]);
 
-  // FIX #2: Fixed panning logic using panOffset ref
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Throttled mouse move for performance
+  const handleMouseMove = useMemo(() => throttle((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (isDragging) {
       const newPanX = e.clientX - panOffset.current.x;
       const newPanY = e.clientY - panOffset.current.y;
@@ -178,17 +194,18 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     // Update cursor position for collaboration
     const { x, y } = getMousePos(e);
     // In a real app, this would broadcast cursor position to other users
-  };
+  }, 16), [isDragging, setPan, getMousePos]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setIsDragging(false);
-  };
+  }, []);
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom(zoom * zoomFactor);
-  };
+    const newZoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
+    setZoom(newZoom);
+  }, [zoom, setZoom]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -199,7 +216,6 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [draw]);
 
-  // This effect will now properly re-run when draw dependencies change
   useEffect(() => {
     draw();
   }, [draw]);
@@ -232,7 +248,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       ref={canvasRef}
       width={width}
       height={height}
-      className="border border-gray-300 cursor-crosshair"
+      className="border border-gray-300 cursor-crosshair rounded-lg shadow-inner"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

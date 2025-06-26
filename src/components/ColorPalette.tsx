@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { Palette, Sparkles, Plus, RefreshCw } from 'lucide-react';
 import { useCanvasStore } from '../services/canvasStore';
 import { AIService } from '../services/aiService';
+import { PanelWrapper } from './ui/PanelWrapper';
+import { ColorSwatch } from './ui/ColorSwatch';
+import { LoadingSpinner } from './ui/LoadingSpinner';
+import { DEFAULT_COLORS } from '../constants';
 import type { ColorPalette as ColorPaletteType } from '../types';
 
 export const ColorPalette: React.FC = () => {
@@ -18,7 +22,6 @@ export const ColorPalette: React.FC = () => {
   const [prompt, setPrompt] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
 
-  // FIX #3: Ensure activePalette is always valid and triggers re-renders
   const activePalette = React.useMemo(() => {
     return palettes.find(p => p.id === activePaletteId) || palettes[0];
   }, [palettes, activePaletteId]);
@@ -35,11 +38,7 @@ export const ColorPalette: React.FC = () => {
         colors,
         generated: true
       };
-      
-      // FIX #3: Add palette and immediately set as active
       addPalette(newPalette);
-      // The store now automatically sets the new palette as active
-      
       setPrompt('');
       setShowPrompt(false);
     } catch (error) {
@@ -49,33 +48,25 @@ export const ColorPalette: React.FC = () => {
     }
   };
 
-  const predefinedColors = [
-    '#FF5733', '#C70039', '#900C3F', '#581845', '#273746',
-    '#1ABC9C', '#16A085', '#2ECC71', '#27AE60', '#3498DB',
-    '#2980B9', '#9B59B6', '#8E44AD', '#E74C3C', '#C0392B',
-    '#F39C12', '#E67E22', '#F1C40F', '#F4D03F', '#85C1E9'
-  ];
-
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Palette size={16} />
-          Colors
-        </h3>
+    <PanelWrapper
+      title="Colors"
+      icon={<Palette size={16} />}
+      actions={
         <button
           onClick={() => setShowPrompt(!showPrompt)}
-          className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-800 transition-colors"
+          className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           title="Generate AI Palette"
+          aria-label="Generate AI Palette"
         >
           <Sparkles size={16} />
         </button>
-      </div>
-
+      }
+    >
       {/* AI Palette Generation */}
       {showPrompt && (
-        <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-          <div className="flex gap-2 mb-2">
+        <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+          <div className="flex gap-2 mb-3">
             <input
               type="text"
               value={prompt}
@@ -83,14 +74,15 @@ export const ColorPalette: React.FC = () => {
               placeholder="e.g., sunset over ocean, neon cyberpunk..."
               className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               onKeyPress={(e) => e.key === 'Enter' && generateAIPalette()}
+              disabled={isGenerating}
             />
             <button
               onClick={generateAIPalette}
               disabled={isGenerating || !prompt.trim()}
-              className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
             >
               {isGenerating ? (
-                <RefreshCw size={16} className="animate-spin" />
+                <LoadingSpinner size={16} />
               ) : (
                 <Sparkles size={16} />
               )}
@@ -103,11 +95,12 @@ export const ColorPalette: React.FC = () => {
       )}
 
       {/* Current Color */}
-      <div className="mb-4">
+      <div className="mb-6">
         <div className="flex items-center gap-3">
-          <div
-            className="w-12 h-12 rounded-lg border-2 border-gray-300 shadow-sm"
-            style={{ backgroundColor: selectedColor }}
+          <ColorSwatch
+            color={selectedColor}
+            selected={true}
+            size="lg"
           />
           <div>
             <p className="text-sm font-medium text-gray-700">Selected Color</p>
@@ -118,14 +111,15 @@ export const ColorPalette: React.FC = () => {
 
       {/* Palette Tabs */}
       {palettes.length > 1 && (
-        <div className="mb-3">
+        <div className="mb-4">
           <div className="flex gap-1 overflow-x-auto pb-2">
             {palettes.map((palette) => (
               <button
                 key={palette.id}
                 onClick={() => setActivePalette(palette.id)}
                 className={`
-                  px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors
+                  px-3 py-2 text-xs font-medium rounded-md whitespace-nowrap transition-colors
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
                   ${palette.id === activePaletteId
                     ? 'bg-blue-100 text-blue-700 border border-blue-300'
                     : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
@@ -141,53 +135,40 @@ export const ColorPalette: React.FC = () => {
       )}
 
       {/* Active Palette Colors */}
-      <div className="mb-4">
-        <h4 className="text-xs font-semibold text-gray-600 mb-2">
+      <div className="mb-6">
+        <h4 className="text-xs font-semibold text-gray-600 mb-3">
           {activePalette?.name || 'Palette'}
         </h4>
         <div className="grid grid-cols-4 gap-2">
           {activePalette?.colors.map((color, index) => (
-            <button
-              key={`${activePalette.id}-${index}-${color}`} // FIX #3: More specific key
+            <ColorSwatch
+              key={`${activePalette.id}-${index}-${color}`}
+              color={color}
+              selected={selectedColor === color}
               onClick={() => setSelectedColor(color)}
-              className={`
-                w-12 h-12 rounded-lg border-2 transition-all duration-200 shadow-sm hover:shadow-md
-                ${selectedColor === color
-                  ? 'border-gray-800 ring-2 ring-blue-500 ring-offset-2'
-                  : 'border-gray-300 hover:border-gray-400'
-                }
-              `}
-              style={{ backgroundColor: color }}
-              title={color}
             />
           ))}
         </div>
       </div>
 
       {/* Extended Color Picker */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-600 mb-2">Quick Colors</h4>
-        <div className="grid grid-cols-5 gap-1.5">
-          {predefinedColors.map((color) => (
-            <button
+      <div className="mb-6">
+        <h4 className="text-xs font-semibold text-gray-600 mb-3">Quick Colors</h4>
+        <div className="grid grid-cols-5 gap-2">
+          {DEFAULT_COLORS.map((color) => (
+            <ColorSwatch
               key={color}
+              color={color}
+              selected={selectedColor === color}
               onClick={() => setSelectedColor(color)}
-              className={`
-                w-8 h-8 rounded-md border transition-all duration-200 hover:scale-110
-                ${selectedColor === color
-                  ? 'border-gray-800 ring-1 ring-blue-500'
-                  : 'border-gray-300'
-                }
-              `}
-              style={{ backgroundColor: color }}
-              title={color}
+              size="sm"
             />
           ))}
         </div>
       </div>
 
       {/* Custom Color Input */}
-      <div className="mt-4 pt-4 border-t border-gray-200">
+      <div className="pt-4 border-t border-gray-200">
         <label className="block text-xs font-semibold text-gray-600 mb-2">
           Custom Color
         </label>
@@ -196,7 +177,7 @@ export const ColorPalette: React.FC = () => {
             type="color"
             value={selectedColor}
             onChange={(e) => setSelectedColor(e.target.value)}
-            className="w-12 h-8 rounded border border-gray-300 cursor-pointer"
+            className="w-12 h-8 rounded border border-gray-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           />
           <input
             type="text"
@@ -207,6 +188,6 @@ export const ColorPalette: React.FC = () => {
           />
         </div>
       </div>
-    </div>
+    </PanelWrapper>
   );
 };

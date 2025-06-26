@@ -7,19 +7,27 @@ import { ExportPanel } from './components/ExportPanel';
 import { CollaborationPanel } from './components/CollaborationPanel';
 import { Canvas } from './components/Canvas';
 import { StatusBar } from './components/StatusBar';
+import { ZoomControls } from './components/ui/ZoomControls';
+import { LoadingSpinner } from './components/ui/LoadingSpinner';
+import { UI_CONSTANTS } from './constants';
 
 function App() {
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const updateCanvasSize = () => {
-      const sidebar = 320; // Approximate sidebar width
-      const header = 80; // Approximate header height
-      const statusBar = 40; // Approximate status bar height
-      const padding = 40; // Padding
+      const isMobileView = window.innerWidth < 768;
+      setIsMobile(isMobileView);
       
-      const availableWidth = window.innerWidth - sidebar - padding;
-      const availableHeight = window.innerHeight - header - statusBar - padding;
+      const sidebarWidth = isMobileView ? 0 : UI_CONSTANTS.SIDEBAR_WIDTH;
+      const headerHeight = UI_CONSTANTS.HEADER_HEIGHT;
+      const statusBarHeight = UI_CONSTANTS.STATUS_BAR_HEIGHT;
+      const padding = UI_CONSTANTS.PANEL_SPACING;
+      
+      const availableWidth = window.innerWidth - sidebarWidth - padding;
+      const availableHeight = window.innerHeight - headerHeight - statusBarHeight - padding;
       
       setCanvasSize({
         width: Math.max(600, Math.min(1200, availableWidth)),
@@ -30,17 +38,38 @@ function App() {
     updateCanvasSize();
     window.addEventListener('resize', updateCanvasSize);
     
-    return () => window.removeEventListener('resize', updateCanvasSize);
+    // Simulate initial loading
+    const timer = setTimeout(() => setIsLoading(false), 1000);
+    
+    return () => {
+      window.removeEventListener('resize', updateCanvasSize);
+      clearTimeout(timer);
+    };
   }, []);
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <LoadingSpinner size={48} className="mb-4" />
+          <h2 className="text-xl font-semibold text-gray-700 mb-2">Loading HexaCanvas</h2>
+          <p className="text-gray-500">Preparing your collaborative art studio...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
       <Header />
       
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        <div className="w-80 bg-gray-50 border-r border-gray-200 p-4 overflow-y-auto">
-          <div className="space-y-6">
+      <div className="flex-1 flex overflow-hidden relative z-10">
+        {/* Desktop Sidebar */}
+        <div className={`
+          ${isMobile ? 'hidden' : 'block'} 
+          w-80 bg-white border-r border-gray-200 shadow-sm overflow-y-auto
+        `}>
+          <div className="p-4 space-y-6">
             <ToolPanel />
             <ColorPalette />
             <LayerPanel />
@@ -49,13 +78,31 @@ function App() {
           </div>
         </div>
 
-        {/* Main Canvas Area */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 flex items-center justify-center p-8 bg-gradient-to-br from-gray-50 to-gray-100">
-            <div className="bg-white rounded-lg shadow-lg p-4">
-              <Canvas width={canvasSize.width} height={canvasSize.height} />
+        {/* Mobile Bottom Toolbar */}
+        {isMobile && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40 p-2">
+            <div className="flex justify-around items-center">
+              {/* Mobile toolbar content would go here */}
+              <div className="text-xs text-gray-500">Mobile tools coming soon</div>
             </div>
           </div>
+        )}
+
+        {/* Main Canvas Area */}
+        <div className="flex-1 flex flex-col relative">
+          <div className="flex-1 flex items-center justify-center p-8 bg-gradient-to-br from-gray-50 to-gray-100">
+            <div className="bg-white rounded-xl shadow-xl p-6 relative">
+              <Canvas width={canvasSize.width} height={canvasSize.height} />
+              
+              {/* Canvas Loading Overlay */}
+              {isLoading && (
+                <LoadingSpinner overlay />
+              )}
+            </div>
+          </div>
+          
+          {/* Floating Zoom Controls */}
+          <ZoomControls />
         </div>
       </div>
 

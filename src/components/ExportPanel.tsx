@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Download, FileImage, FileText, HardDrive, Upload } from 'lucide-react';
 import { useCanvasStore } from '../services/canvasStore';
 import { ExportService } from '../services/exportService';
+import { PanelWrapper } from './ui/PanelWrapper';
+import { LoadingSpinner } from './ui/LoadingSpinner';
 
 export const ExportPanel: React.FC = () => {
   const { layers, exportCanvas, importCanvas } = useCanvasStore();
@@ -39,7 +41,6 @@ export const ExportPanel: React.FC = () => {
       let blob: Blob;
       if (typeof data === 'string') {
         if (exportFormat === 'png') {
-          // Convert data URL to blob
           const response = await fetch(data);
           blob = await response.blob();
         } else {
@@ -99,7 +100,6 @@ export const ExportPanel: React.FC = () => {
       alert('Unsupported file format. Please use .hex or .json files.');
     }
 
-    // Reset input
     event.target.value = '';
   };
 
@@ -116,25 +116,25 @@ export const ExportPanel: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-        <Download size={16} />
-        Export & Import
-      </h3>
+  const formatOptions = [
+    { value: 'png', label: 'PNG', icon: FileImage, desc: 'High quality image' },
+    { value: 'svg', label: 'SVG', icon: FileText, desc: 'Vector graphics' },
+    { value: 'hex', label: 'HEX', icon: HardDrive, desc: 'Native format' }
+  ];
 
+  return (
+    <PanelWrapper
+      title="Export & Import"
+      icon={<Download size={16} />}
+    >
       {/* Export Section */}
       <div className="mb-6">
-        <h4 className="text-xs font-semibold text-gray-600 mb-2">Export Artwork</h4>
+        <h4 className="text-xs font-semibold text-gray-600 mb-3">Export Artwork</h4>
         
         {/* Format Selection */}
-        <div className="mb-3">
+        <div className="mb-4">
           <div className="grid grid-cols-3 gap-2">
-            {[
-              { value: 'png', label: 'PNG', icon: FileImage, desc: 'High quality image' },
-              { value: 'svg', label: 'SVG', icon: FileText, desc: 'Vector graphics' },
-              { value: 'hex', label: 'HEX', icon: HardDrive, desc: 'Native format' }
-            ].map((format) => {
+            {formatOptions.map((format) => {
               const Icon = format.icon;
               return (
                 <button
@@ -142,9 +142,10 @@ export const ExportPanel: React.FC = () => {
                   onClick={() => setExportFormat(format.value as any)}
                   className={`
                     p-3 rounded-lg border-2 transition-all duration-200 text-center
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
                     ${exportFormat === format.value
                       ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-200 hover:border-gray-300 text-gray-600 hover:text-gray-800'
+                      : 'border-gray-200 hover:border-gray-300 text-gray-600 hover:text-gray-800 hover:bg-gray-50'
                     }
                   `}
                 >
@@ -160,11 +161,11 @@ export const ExportPanel: React.FC = () => {
         <button
           onClick={handleExport}
           disabled={isExporting || layers.every(l => l.cells.size === 0)}
-          className="w-full p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          className="w-full p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
         >
           {isExporting ? (
             <>
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <LoadingSpinner size={16} />
               Exporting...
             </>
           ) : (
@@ -178,8 +179,8 @@ export const ExportPanel: React.FC = () => {
 
       {/* Import Section */}
       <div className="mb-6">
-        <h4 className="text-xs font-semibold text-gray-600 mb-2">Import Artwork</h4>
-        <label className="w-full p-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-400 text-gray-600 hover:text-gray-800 transition-colors cursor-pointer flex items-center justify-center gap-2">
+        <h4 className="text-xs font-semibold text-gray-600 mb-3">Import Artwork</h4>
+        <label className="w-full p-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-400 text-gray-600 hover:text-gray-800 transition-colors cursor-pointer flex items-center justify-center gap-2 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
           <Upload size={16} />
           <span className="text-sm">Import .hex or .json file</span>
           <input
@@ -192,11 +193,11 @@ export const ExportPanel: React.FC = () => {
       </div>
 
       {/* Project Save */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-600 mb-2">Project</h4>
+      <div className="mb-6">
+        <h4 className="text-xs font-semibold text-gray-600 mb-3">Project</h4>
         <button
           onClick={saveProject}
-          className="w-full p-3 border border-gray-300 text-gray-700 rounded-lg hover:border-gray-400 hover:text-gray-800 transition-colors flex items-center justify-center gap-2"
+          className="w-full p-3 border border-gray-300 text-gray-700 rounded-lg hover:border-gray-400 hover:text-gray-800 transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
         >
           <HardDrive size={16} />
           Save Project
@@ -204,14 +205,23 @@ export const ExportPanel: React.FC = () => {
       </div>
 
       {/* Export Info */}
-      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-        <h5 className="text-xs font-semibold text-gray-700 mb-1">Export Info</h5>
+      <div className="p-3 bg-gray-50 rounded-lg">
+        <h5 className="text-xs font-semibold text-gray-700 mb-2">Export Info</h5>
         <div className="text-xs text-gray-600 space-y-1">
-          <div>Total layers: {layers.length}</div>
-          <div>Total cells: {layers.reduce((sum, layer) => sum + layer.cells.size, 0)}</div>
-          <div>Visible layers: {layers.filter(l => l.visible).length}</div>
+          <div className="flex justify-between">
+            <span>Total layers:</span>
+            <span className="font-mono">{layers.length}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Total cells:</span>
+            <span className="font-mono">{layers.reduce((sum, layer) => sum + layer.cells.size, 0).toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Visible layers:</span>
+            <span className="font-mono">{layers.filter(l => l.visible).length}</span>
+          </div>
         </div>
       </div>
-    </div>
+    </PanelWrapper>
   );
 };
