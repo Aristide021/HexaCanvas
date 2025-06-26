@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useCanvasStore } from '../services/canvasStore';
 import { useGridManager } from '../hooks/useHexGrid';
 import { calculateViewportBounds, isCellInViewport } from '../utils/performance';
+import { TriangleGrid } from '../utils/triangleGrid';
 
 interface CanvasProps {
   width: number;
@@ -38,24 +39,21 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     currentUser
   } = useCanvasStore();
 
-  // Use the new grid manager with global grid type
   const { gridManager, getGridForLayer } = useGridManager(gridSize, globalGridType);
 
-  // Get the active layer to determine which grid to use for interactions
   const activeLayer = layers.find(l => l.id === activeLayerId);
   const interactionGrid = activeLayer ? getGridForLayer(activeLayer.gridType) : gridManager.getGrid();
 
-  // Calculate viewport bounds for performance optimization
   const viewportBounds = useMemo(() => 
     calculateViewportBounds(width, height, zoom, panX, panY, gridSize),
     [width, height, zoom, panX, panY, gridSize]
   );
 
-  // Filter visible cells for performance
   const visibleCells = useMemo(() => {
     const cells: Array<{ q: number; r: number; color: string; layerId: string; gridType: string }> = [];
     layers.filter(layer => layer.visible).forEach(layer => {
       layer.cells.forEach(cell => {
+        // Use a more generous viewport check for non-square grids
         if (isCellInViewport(cell.q, cell.r, viewportBounds)) {
           cells.push({ ...cell, gridType: layer.gridType });
         }
@@ -63,96 +61,51 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     });
     return cells;
   }, [layers, viewportBounds]);
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-    
-    // Apply zoom and pan
-    ctx.save();
-    ctx.translate(width / 2 + panX, height / 2 + panY);
-    ctx.scale(zoom, zoom);
-
-    // Draw grid if enabled
-    if (showGrid) {
-      drawGrid(ctx);
-    }
-
-    // Draw visible cells only (performance optimization)
-    visibleCells.forEach(cell => {
-      const layer = layers.find(l => l.id === cell.layerId);
-      if (layer) {
-        ctx.globalAlpha = layer.opacity;
-        drawCell(ctx, cell.q, cell.r, cell.color, layer.gridType);
-      }
-    });
-
-    // Draw hover preview
-    if (hoverCell && (activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'picker' || activeTool === 'fill')) {
-      ctx.globalAlpha = 0.5;
-      drawHoverPreview(ctx, hoverCell.q, hoverCell.r);
-    }
-
-    // Draw user cursors
-    ctx.globalAlpha = 1;
-    users.forEach(user => {
-      if (user.cursor && user.id !== currentUser.id) {
-        drawUserCursor(ctx, user.cursor.x, user.cursor.y, user.color, user.name);
-      }
-    });
-
-    ctx.restore();
-  }, [
-    width, height, layers, zoom, panX, panY, showGrid, 
-    users, currentUser, gridManager, visibleCells, hoverCell, activeTool, selectedColor, globalGridType
-  ]);
-
+  
   const drawGrid = useCallback((ctx: CanvasRenderingContext2D) => {
-    // Increase the visible radius significantly for triangle grid
-    const baseRadius = Math.ceil(Math.max(width, height) / (zoom * gridSize * 2)) + 2;
-    const visibleRadius = globalGridType === 'triangle' ? baseRadius * 2 : baseRadius;
-    
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
 
-    // Draw grid using the global grid type
     const grid = gridManager.getGrid(globalGridType);
-
-    // For triangle grid, we need denser coverage
-    const step = globalGridType === 'triangle' ? 1 : 1;
     
-    for (let q = -visibleRadius; q <= visibleRadius; q += step) {
-      for (let r = -visibleRadius; r <= visibleRadius; r += step) {
+    // Calculate viewport corners in world coordinates
+    const halfW = width / (2 * zoom);
+    const halfH = height / (2 * zoom);
+    const view = {
+      left: -panX / zoom - halfW,
+      right: -panX / zoom + halfW,
+      top: -panY / zoom - halfH,
+      bottom: -panY / zoom + halfH,
+    };
+    
+    const startCoords = grid.pixelToAxial(view.left, view.top);
+    const endCoords = grid.pixelToAxial(view.right, view.bottom);
+
+    const qMin = Math.min(startCoords.q, endCoords.q) - 2;
+    const qMax = Math.max(startCoords.q, endCoords.q) + 2;
+    const rMin = Math.min(startCoords.r, endCoords.r) - 2;
+    const rMax = Math.max(startCoords.r, endCoords.r) + 2;
+    
+    for (let r = rMin; r <= rMax; r++) {
+      for (let q = qMin; q <= qMax; q++) {
         const { x, y } = grid.axialToPixel(q, r);
         const vertices = grid.getCellVertices(x, y);
         
         if (vertices.length > 0) {
           ctx.beginPath();
           ctx.moveTo(vertices[0].x, vertices[0].y);
-          
           for (let i = 1; i < vertices.length; i++) {
             ctx.lineTo(vertices[i].x, vertices[i].y);
           }
-          
           ctx.closePath();
           ctx.stroke();
         }
       }
     }
-  }, [gridManager, globalGridType, width, height, zoom, gridSize]);
+  }, [gridManager, globalGridType, width, height, zoom, panX, panY, gridSize]);
 
   const drawCell = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number, color: string, layerGridType: string) => {
-    // Get the appropriate grid for this layer
-    const grid = layerGridType === 'pixel' ? 
-      gridManager.getGrid('pixel') : 
-      gridManager.getGrid(globalGridType);
-    
+    const grid = getGridForLayer(layerGridType);
     const { x, y } = grid.axialToPixel(q, r);
     const vertices = grid.getCellVertices(x, y);
     
@@ -161,81 +114,53 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(vertices[0].x, vertices[0].y);
-    
-    for (let i = 1; i < vertices.length; i++) {
-      ctx.lineTo(vertices[i].x, vertices[i].y);
-    }
-    
+    for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
     ctx.closePath();
     ctx.fill();
 
-    // Add subtle border
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1 / zoom;
     ctx.stroke();
-  }, [gridManager, globalGridType, zoom]);
+  }, [getGridForLayer, zoom]);
 
   const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, q: number, r: number) => {
     const { x, y } = interactionGrid.axialToPixel(q, r);
     const vertices = interactionGrid.getCellVertices(x, y);
-    
     if (vertices.length === 0) return;
-    
+
     if (activeTool === 'brush') {
-      // Show brush preview with selected color
       ctx.fillStyle = selectedColor;
       ctx.beginPath();
       ctx.moveTo(vertices[0].x, vertices[0].y);
-      
-      for (let i = 1; i < vertices.length; i++) {
-        ctx.lineTo(vertices[i].x, vertices[i].y);
-      }
-      
+      for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
       ctx.closePath();
       ctx.fill();
     } else if (activeTool === 'eraser') {
-      // Show eraser preview with red outline
       ctx.strokeStyle = '#FF4444';
       ctx.lineWidth = 2 / zoom;
       ctx.setLineDash([5 / zoom, 5 / zoom]);
-      
       ctx.beginPath();
       ctx.moveTo(vertices[0].x, vertices[0].y);
-      
-      for (let i = 1; i < vertices.length; i++) {
-        ctx.lineTo(vertices[i].x, vertices[i].y);
-      }
-      
+      for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
     } else if (activeTool === 'fill') {
-      // Show fill preview with pattern
       ctx.fillStyle = selectedColor;
       ctx.globalAlpha = 0.3;
       ctx.beginPath();
       ctx.moveTo(vertices[0].x, vertices[0].y);
-      
-      for (let i = 1; i < vertices.length; i++) {
-        ctx.lineTo(vertices[i].x, vertices[i].y);
-      }
-      
+      for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
       ctx.closePath();
       ctx.fill();
       ctx.globalAlpha = 0.5;
     }
 
-    // Add outline for all tools
-    ctx.strokeStyle = activeTool === 'picker' ? '#10B981' : 
-                     activeTool === 'fill' ? '#F59E0B' : '#3B82F6';
+    ctx.strokeStyle = activeTool === 'picker' ? '#10B981' : activeTool === 'fill' ? '#F59E0B' : '#3B82F6';
     ctx.lineWidth = 2 / zoom;
     ctx.beginPath();
     ctx.moveTo(vertices[0].x, vertices[0].y);
-    
-    for (let i = 1; i < vertices.length; i++) {
-      ctx.lineTo(vertices[i].x, vertices[i].y);
-    }
-    
+    for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
     ctx.closePath();
     ctx.stroke();
   }, [interactionGrid, zoom, activeTool, selectedColor]);
@@ -245,56 +170,71 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     ctx.beginPath();
     ctx.arc(x, y, 5 / zoom, 0, Math.PI * 2);
     ctx.fill();
-    
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
     ctx.font = `${12 / zoom}px Arial`;
     ctx.fillText(name, x + 8 / zoom, y - 8 / zoom);
   }, [zoom]);
 
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.translate(width / 2 + panX, height / 2 + panY);
+    ctx.scale(zoom, zoom);
+
+    if (showGrid) drawGrid(ctx);
+
+    visibleCells.forEach(cell => {
+      const layer = layers.find(l => l.id === cell.layerId);
+      if (layer) {
+        ctx.globalAlpha = layer.opacity;
+        drawCell(ctx, cell.q, cell.r, cell.color, layer.gridType);
+      }
+    });
+
+    if (hoverCell && (activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'picker' || activeTool === 'fill')) {
+      ctx.globalAlpha = 0.5;
+      drawHoverPreview(ctx, hoverCell.q, hoverCell.r);
+    }
+
+    ctx.globalAlpha = 1;
+    users.forEach(user => {
+      if (user.cursor && user.id !== currentUser.id) {
+        drawUserCursor(ctx, user.cursor.x, user.cursor.y, user.color, user.name);
+      }
+    });
+
+    ctx.restore();
+  }, [width, height, layers, zoom, panX, panY, showGrid, users, currentUser, visibleCells, hoverCell, activeTool, selectedColor, drawGrid, drawCell, drawHoverPreview, drawUserCursor]);
+
   const getMousePos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-
     const rect = canvas.getBoundingClientRect();
-    const x = ((e.clientX - rect.left - width / 2 - panX) / zoom);
-    const y = ((e.clientY - rect.top - height / 2 - panY) / zoom);
-    
+    const x = (e.clientX - rect.left - width / 2 - panX) / zoom;
+    const y = (e.clientY - rect.top - height / 2 - panY) / zoom;
     return { x, y };
   }, [width, height, panX, panY, zoom]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
-      // Pan mode
       setIsDragging(true);
       panOffset.current = { x: e.clientX - panX, y: e.clientY - panY };
       return;
     }
-
     if (e.button === 0) {
       const { x, y } = getMousePos(e);
       const axial = interactionGrid.pixelToAxial(x, y);
-      
-      if (activeTool === 'picker') {
-        // Color picker tool
-        pickColor(axial.q, axial.r);
-        return;
-      }
-
-      if (activeTool === 'fill') {
-        // Fill tool
-        fillArea(axial.q, axial.r, selectedColor);
-        return;
-      }
-      
-      // Start painting for brush and eraser
+      if (activeTool === 'picker') { pickColor(axial.q, axial.r); return; }
+      if (activeTool === 'fill') { fillArea(axial.q, axial.r, selectedColor); return; }
       if (activeTool === 'brush' || activeTool === 'eraser') {
         startPainting();
-        
-        if (activeTool === 'brush') {
-          paintCell(axial.q, axial.r, selectedColor);
-        } else if (activeTool === 'eraser') {
-          eraseCell(axial.q, axial.r);
-        }
+        if (activeTool === 'brush') paintCell(axial.q, axial.r, selectedColor);
+        else if (activeTool === 'eraser') eraseCell(axial.q, axial.r);
       }
     }
   }, [getMousePos, interactionGrid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
@@ -302,26 +242,14 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getMousePos(e);
     const axial = interactionGrid.pixelToAxial(x, y);
-    
-    // Always update hover cell for preview
-    if (!hoverCell || hoverCell.q !== axial.q || hoverCell.r !== axial.r) {
-      setHoverCell({ q: axial.q, r: axial.r });
-    }
-
+    if (!hoverCell || hoverCell.q !== axial.q || hoverCell.r !== axial.r) setHoverCell({ q: axial.q, r: axial.r });
     if (isDragging) {
-      const newPanX = e.clientX - panOffset.current.x;
-      const newPanY = e.clientY - panOffset.current.y;
-      setPan(newPanX, newPanY);
+      setPan(e.clientX - panOffset.current.x, e.clientY - panOffset.current.y);
       return;
     }
-
-    // Direct, unthrottled painting during drag for smooth strokes
     if (isPainting && (activeTool === 'brush' || activeTool === 'eraser')) {
-      if (activeTool === 'brush') {
-        paintCell(axial.q, axial.r, selectedColor);
-      } else if (activeTool === 'eraser') {
-        eraseCell(axial.q, axial.r);
-      }
+      if (activeTool === 'brush') paintCell(axial.q, axial.r, selectedColor);
+      else if (activeTool === 'eraser') eraseCell(axial.q, axial.r);
     }
   }, [isDragging, isPainting, setPan, getMousePos, interactionGrid, activeTool, selectedColor, paintCell, eraseCell, hoverCell]);
 
@@ -339,61 +267,31 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
-    setZoom(newZoom);
+    setZoom(Math.max(0.1, Math.min(5, zoom * zoomFactor)));
   }, [zoom, setZoom]);
 
   useEffect(() => {
-    const handleResize = () => {
-      draw();
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('resize', draw);
+    return () => window.removeEventListener('resize', draw);
   }, [draw]);
 
-  useEffect(() => {
-    draw();
-  }, [draw]);
+  useEffect(() => { draw(); }, [draw]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ') {
-        e.preventDefault();
-        document.body.style.cursor = 'grab';
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === ' ') {
-        document.body.style.cursor = 'default';
-      }
-    };
-
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === ' ') { e.preventDefault(); document.body.style.cursor = 'grab'; } };
+    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === ' ') { document.body.style.cursor = 'default'; } };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
 
-  // Dynamic cursor based on active tool
   const getCursorStyle = () => {
     switch (activeTool) {
-      case 'brush':
-        return 'crosshair';
-      case 'eraser':
-        return 'crosshair';
-      case 'picker':
-        return 'crosshair';
-      case 'fill':
-        return 'crosshair';
-      case 'move':
-        return isDragging ? 'grabbing' : 'grab';
-      default:
-        return 'crosshair';
+      case 'move': return isDragging ? 'grabbing' : 'grab';
+      default: return 'crosshair';
     }
   };
 
@@ -403,10 +301,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       width={width}
       height={height}
       className="border border-gray-300 rounded-lg shadow-inner"
-      style={{ 
-        touchAction: 'none',
-        cursor: getCursorStyle()
-      }}
+      style={{ touchAction: 'none', cursor: getCursorStyle() }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
