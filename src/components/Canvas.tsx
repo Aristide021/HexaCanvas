@@ -95,7 +95,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     });
 
     // Draw hover preview
-    if (hoverCell && (activeTool === 'brush' || activeTool === 'eraser')) {
+    if (hoverCell && (activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'picker' || activeTool === 'fill')) {
       ctx.globalAlpha = 0.5;
       drawHoverPreview(ctx, hoverCell.q, hoverCell.r);
     }
@@ -193,10 +193,25 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
+    } else if (activeTool === 'fill') {
+      // Show fill preview with pattern
+      ctx.fillStyle = selectedColor;
+      ctx.globalAlpha = 0.3;
+      ctx.beginPath();
+      ctx.moveTo(vertices[0].x, vertices[0].y);
+      
+      for (let i = 1; i < vertices.length; i++) {
+        ctx.lineTo(vertices[i].x, vertices[i].y);
+      }
+      
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 0.5;
     }
 
     // Add outline for all tools
-    ctx.strokeStyle = activeTool === 'picker' ? '#10B981' : '#3B82F6';
+    ctx.strokeStyle = activeTool === 'picker' ? '#10B981' : 
+                     activeTool === 'fill' ? '#F59E0B' : '#3B82F6';
     ctx.lineWidth = 2 / zoom;
     ctx.beginPath();
     ctx.moveTo(vertices[0].x, vertices[0].y);
@@ -255,17 +270,20 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         return;
       }
       
-      startPainting();
-      
-      if (activeTool === 'brush') {
-        paintCell(axial.q, axial.r, selectedColor);
-      } else if (activeTool === 'eraser') {
-        eraseCell(axial.q, axial.r);
+      // Start painting for brush and eraser
+      if (activeTool === 'brush' || activeTool === 'eraser') {
+        startPainting();
+        
+        if (activeTool === 'brush') {
+          paintCell(axial.q, axial.r, selectedColor);
+        } else if (activeTool === 'eraser') {
+          eraseCell(axial.q, axial.r);
+        }
       }
     }
   }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, fillArea, pickColor, startPainting, panX, panY]);
 
-  // Throttled mouse move for performance
+  // FIXED: Reduced throttle delay for smoother brush strokes
   const handleMouseMove = useMemo(() => throttle((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getMousePos(e);
     const axial = grid.pixelToAxial(x, y);
@@ -280,7 +298,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       return;
     }
 
-    // Continue painting/erasing while dragging
+    // FIXED: Continue painting/erasing while dragging with better responsiveness
     if (isPainting && (activeTool === 'brush' || activeTool === 'eraser')) {
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
@@ -291,7 +309,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
     // Update cursor position for collaboration
     // In a real app, this would broadcast cursor position to other users
-  }, 16), [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]);
+  }, 8), [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]); // Reduced from 16ms to 8ms
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
