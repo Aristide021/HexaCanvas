@@ -11,7 +11,6 @@ interface CanvasProps {
 
 export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { grid } = useHexGrid(20);
   const [isDragging, setIsDragging] = useState(false);
   const panOffset = useRef({ x: 0, y: 0 });
 
@@ -25,6 +24,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     selectedColor,
     activeTool,
     isPainting,
+    gridSize,
     paintCell,
     eraseCell,
     startPainting,
@@ -34,6 +34,14 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     users,
     currentUser
   } = useCanvasStore();
+
+  // Create hex grid with dynamic size
+  const { grid } = useHexGrid(gridSize);
+
+  // Update grid size when it changes
+  useEffect(() => {
+    grid.setSize(gridSize);
+  }, [grid, gridSize]);
 
   // Calculate viewport bounds for performance optimization
   const viewportBounds = useMemo(() => 

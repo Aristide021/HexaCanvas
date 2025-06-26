@@ -39,7 +39,10 @@ interface CanvasStore extends CanvasState {
   
   setZoom: (zoom: number) => void;
   setPan: (x: number, y: number) => void;
+  setGridSize: (size: number) => void;
   toggleGrid: () => void;
+  resetView: () => void;
+  clearCanvas: () => void;
   
   executeCommand: (command: AnyCommand) => void;
   undo: () => void;
@@ -394,8 +397,29 @@ export const useCanvasStore = create<CanvasStore>()(
       state.panY = y;
     }),
 
+    setGridSize: (size) => set((state) => {
+      state.gridSize = Math.max(10, Math.min(50, size));
+    }),
+
     toggleGrid: () => set((state) => {
       state.showGrid = !state.showGrid;
+    }),
+
+    resetView: () => set((state) => {
+      state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
+    }),
+
+    clearCanvas: () => set((state) => {
+      // Clear all layers
+      state.layers.forEach(layer => {
+        layer.cells.clear();
+      });
+      
+      // Clear history
+      state.history = [];
+      state.historyIndex = -1;
     }),
 
     addPalette: (palette) => set((state) => {
