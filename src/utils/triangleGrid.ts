@@ -2,131 +2,139 @@ import { CellCoordinate, IGrid } from '../types';
 
 export class TriangleGrid implements IGrid {
   private size: number;
+  private triHeight: number;
+  private triWidth: number;
 
   constructor(size: number = 20) {
     this.size = size;
+    // The height of an equilateral triangle
+    this.triHeight = size * (Math.sqrt(3) / 2);
+    // The base width of two triangles side-by-side
+    this.triWidth = size;
   }
 
-  // Convert axial coordinates to pixel coordinates for triangular grid
+  // Convert grid coordinates (q, r) to pixel coordinates (x, y)
   axialToPixel(q: number, r: number): { x: number; y: number } {
-    // Triangular grid uses a different coordinate system
-    // Each triangle has a base width and height
-    const width = this.size * Math.sqrt(3);
-    const height = this.size * 1.5;
-    
-    // Calculate base position
-    const x = q * width * 0.5 + (r % 2) * width * 0.25;
-    const y = r * height * 0.67;
-    
+    const x = q * this.triWidth * 0.5;
+    const y = r * this.triHeight;
     return { x, y };
   }
 
-  // Convert pixel coordinates to axial coordinates
+  // Convert pixel coordinates (x, y) to grid coordinates (q, r)
   pixelToAxial(x: number, y: number): CellCoordinate {
-    const width = this.size * Math.sqrt(3);
-    const height = this.size * 1.5;
+    const r = Math.round(y / this.triHeight);
+    const q = Math.round(x / (this.triWidth * 0.5));
+
+    // Determine the precise triangle by checking the local position within its containing rectangle
+    const relY = y - r * this.triHeight;
+    const relX = x - q * this.triWidth * 0.5;
     
-    // Approximate grid position
-    const r = Math.round(y / (height * 0.67));
-    const q = Math.round((x - (r % 2) * width * 0.25) / (width * 0.5));
+    // Gradient of the diagonal line in the containing rectangle
+    const gradient = this.triHeight / (this.triWidth * 0.5);
+
+    let finalQ = q;
+    let finalR = r;
     
-    return this.roundTriangle({ q, r });
+    // The grid is a checkerboard pattern of upward and downward triangles
+    if ((q + r) % 2 === 0) { // Downward-pointing triangle area
+        if (relY > -gradient * relX + this.triHeight) { // Point is in the triangle below
+            finalR++;
+        }
+    } else { // Upward-pointing triangle area
+        if (relY < gradient * relX) { // Point is in the triangle to the left-up
+            finalR--;
+        }
+    }
+    
+    return { q: finalQ, r: finalR };
   }
 
-  // Round fractional triangle coordinates to nearest triangle
-  private roundTriangle(coord: CellCoordinate): CellCoordinate {
-    const q = Math.round(coord.q);
-    const r = Math.round(coord.r);
-    return { q, r };
-  }
-
-  // Get triangle vertices for drawing
+  // Get triangle vertices for drawing, centered on the *correct* pixel location
   getCellVertices(centerX: number, centerY: number): { x: number; y: number }[] {
-    const height = this.size;
-    const width = this.size * Math.sqrt(3) / 2;
-    
-    // Determine triangle orientation based on grid position
-    // We'll use a checkerboard pattern: even sum = up, odd sum = down
     const { q, r } = this.pixelToAxial(centerX, centerY);
-    const isUpward = (q + r) % 2 === 0;
+    const isUpward = (q + r) % 2 !== 0; // In this system, odd sum is upward
+
+    // Recalculate the true center for perfect alignment
+    const trueCenter = this.axialToPixel(q, r);
+    const cx = trueCenter.x;
+    const cy = trueCenter.y;
+    
+    const halfWidth = this.triWidth / 2;
     
     if (isUpward) {
       // Upward pointing triangle
       return [
-        { x: centerX, y: centerY - height * 0.67 },           // Top vertex
-        { x: centerX - width, y: centerY + height * 0.33 },   // Bottom left
-        { x: centerX + width, y: centerY + height * 0.33 }    // Bottom right
+        { x: cx, y: cy - (2 / 3) * this.triHeight },
+        { x: cx - halfWidth, y: cy + (1 / 3) * this.triHeight },
+        { x: cx + halfWidth, y: cy + (1 / 3) * this.triHeight }
       ];
     } else {
       // Downward pointing triangle
       return [
-        { x: centerX - width, y: centerY - height * 0.33 },   // Top left
-        { x: centerX + width, y: centerY - height * 0.33 },   // Top right
-        { x: centerX, y: centerY + height * 0.67 }            // Bottom vertex
+        { x: cx, y: cy + (2 / 3) * this.triHeight },
+        { x: cx + halfWidth, y: cy - (1 / 3) * this.triHeight },
+        { x: cx - halfWidth, y: cy - (1 / 3) * this.triHeight }
       ];
     }
   }
 
-  // Get neighbors of a triangle cell
+  // Get the three neighbors of a triangle cell
   getNeighbors(q: number, r: number): CellCoordinate[] {
-    // Triangle neighbors depend on orientation
-    const isUpward = (q + r) % 2 === 0;
+    const isUpward = (q + r) % 2 !== 0;
     
     if (isUpward) {
-      // Upward triangle has 3 neighbors below and sides
+      // Upward triangle's neighbors are left, right, and top
       return [
-        { q: q - 1, r: r },     // Left
-        { q: q + 1, r: r },     // Right
-        { q: q, r: r + 1 }      // Below
+        { q: q - 1, r: r }, // Left
+        { q: q + 1, r: r }, // Right
+        { q: q, r: r - 1 }  // Top
       ];
     } else {
-      // Downward triangle has 3 neighbors above and sides
+      // Downward triangle's neighbors are left, right, and bottom
       return [
-        { q: q - 1, r: r },     // Left
-        { q: q + 1, r: r },     // Right
-        { q: q, r: r - 1 }      // Above
+        { q: q - 1, r: r }, // Left
+        { q: q + 1, r: r }, // Right
+        { q: q, r: r + 1 }  // Bottom
       ];
     }
   }
 
-  // Check if point is inside triangle cell bounds
+  // Check if a point is inside a triangle cell using barycentric coordinates
   pointInCell(x: number, y: number, cellX: number, cellY: number): boolean {
     const vertices = this.getCellVertices(cellX, cellY);
     
-    // Use barycentric coordinates to check if point is inside triangle
-    const v0 = { x: vertices[2].x - vertices[0].x, y: vertices[2].y - vertices[0].y };
-    const v1 = { x: vertices[1].x - vertices[0].x, y: vertices[1].y - vertices[0].y };
-    const v2 = { x: x - vertices[0].x, y: y - vertices[0].y };
+    const x1 = vertices[0].x, y1 = vertices[0].y;
+    const x2 = vertices[1].x, y2 = vertices[1].y;
+    const x3 = vertices[2].x, y3 = vertices[2].y;
 
-    const dot00 = v0.x * v0.x + v0.y * v0.y;
-    const dot01 = v0.x * v1.x + v0.y * v1.y;
-    const dot02 = v0.x * v2.x + v0.y * v2.y;
-    const dot11 = v1.x * v1.x + v1.y * v1.y;
-    const dot12 = v1.x * v2.x + v1.y * v2.y;
+    const denominator = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3);
+    const a = ((y2 - y3) * (x - x3) + (x3 - x2) * (y - y3)) / denominator;
+    const b = ((y3 - y1) * (x - x3) + (x1 - x3) * (y - y3)) / denominator;
+    const c = 1 - a - b;
 
-    const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
-    const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-    const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-
-    return (u >= 0) && (v >= 0) && (u + v <= 1);
+    return a >= 0 && a <= 1 && b >= 0 && b <= 1 && c >= 0 && c <= 1;
   }
 
-  // Snap point to grid
-  snapToGrid(x: number, y: number, threshold: number = 3): { x: number; y: number } {
-    const axial = this.pixelToAxial(x, y);
-    const snapped = this.axialToPixel(axial.q, axial.r);
+  // Snap point to the center of the nearest triangle grid cell
+  snapToGrid(x: number, y: number, threshold?: number): { x: number; y: number } {
+    const { q, r } = this.pixelToAxial(x, y);
+    const snapped = this.axialToPixel(q, r);
     
-    const distance = Math.sqrt(Math.pow(x - snapped.x, 2) + Math.pow(y - snapped.y, 2));
-    
-    if (distance <= threshold) {
-      return snapped;
+    if (threshold) {
+        const distance = Math.sqrt(Math.pow(x - snapped.x, 2) + Math.pow(y - snapped.y, 2));
+        if (distance <= threshold) {
+            return snapped;
+        }
     }
     
-    return { x, y };
+    return snapped; // For grids, we usually want to snap regardless of threshold
   }
 
-  setSize(size: number) {
+  // Update size and recalculate dependent properties
+  setSize(size: number): void {
     this.size = size;
+    this.triHeight = size * (Math.sqrt(3) / 2);
+    this.triWidth = size;
   }
 
   getSize(): number {
