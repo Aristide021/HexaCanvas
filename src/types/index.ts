@@ -60,6 +60,38 @@ export interface Session {
   lastModified: number;
 }
 
+// Command Pattern for Undo/Redo
+export interface Command {
+  execute(): void;
+  undo(): void;
+  timestamp: number;
+  userId: string;
+}
+
+export interface PaintCommand extends Command {
+  type: 'paint';
+  cellId: string;
+  layerId: string;
+  newColor: string;
+  previousColor?: string;
+  wasEmpty: boolean;
+}
+
+export interface EraseCommand extends Command {
+  type: 'erase';
+  cellId: string;
+  layerId: string;
+  previousColor: string;
+}
+
+export interface LayerCommand extends Command {
+  type: 'layer_add' | 'layer_remove' | 'layer_update';
+  layerId: string;
+  layerData?: any;
+}
+
+export type AnyCommand = PaintCommand | EraseCommand | LayerCommand;
+
 export interface Delta {
   type: 'cell_update' | 'layer_add' | 'layer_remove' | 'layer_update';
   payload: any;

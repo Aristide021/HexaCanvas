@@ -1,9 +1,7 @@
-import { Decimal } from 'decimal.js';
 import { CellCoordinate } from '../types';
 
 export class HexGrid {
   private size: number;
-  private precision = new Decimal(0.001);
 
   constructor(size: number = 20) {
     this.size = size;

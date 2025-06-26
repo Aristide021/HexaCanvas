@@ -19,7 +19,9 @@ export const ToolPanel: React.FC = () => {
     showGrid,
     toggleGrid,
     undo,
-    redo
+    redo,
+    canUndo,
+    canRedo
   } = useCanvasStore();
 
   return (
@@ -44,16 +46,18 @@ export const ToolPanel: React.FC = () => {
         <div className="flex gap-2">
           <button
             onClick={undo}
-            className="flex-1 p-2 rounded-md border border-gray-200 hover:border-gray-300 text-gray-600 hover:text-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            title="Undo"
+            disabled={!canUndo()}
+            className="flex-1 p-2 rounded-md border border-gray-200 hover:border-gray-300 text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            title="Undo (Ctrl+Z)"
             aria-label="Undo"
           >
             <RotateCcw size={16} className="mx-auto" />
           </button>
           <button
             onClick={redo}
-            className="flex-1 p-2 rounded-md border border-gray-200 hover:border-gray-300 text-gray-600 hover:text-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            title="Redo"
+            disabled={!canRedo()}
+            className="flex-1 p-2 rounded-md border border-gray-200 hover:border-gray-300 text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            title="Redo (Ctrl+Y)"
             aria-label="Redo"
           >
             <RotateCw size={16} className="mx-auto" />

@@ -9,12 +9,16 @@ import { Canvas } from './components/Canvas';
 import { StatusBar } from './components/StatusBar';
 import { ZoomControls } from './components/ui/ZoomControls';
 import { LoadingSpinner } from './components/ui/LoadingSpinner';
+import { MobileToolbar } from './components/MobileToolbar';
+import { useCanvasStore } from './services/canvasStore';
 import { UI_CONSTANTS } from './constants';
 
 function App() {
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const [isLoading, setIsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  
+  const { undo, redo, canUndo, canRedo } = useCanvasStore();
 
   useEffect(() => {
     const updateCanvasSize = () => {
@@ -24,10 +28,11 @@ function App() {
       const sidebarWidth = isMobileView ? 0 : UI_CONSTANTS.SIDEBAR_WIDTH;
       const headerHeight = UI_CONSTANTS.HEADER_HEIGHT;
       const statusBarHeight = UI_CONSTANTS.STATUS_BAR_HEIGHT;
+      const mobileToolbarHeight = isMobileView ? 80 : 0;
       const padding = UI_CONSTANTS.PANEL_SPACING;
       
       const availableWidth = window.innerWidth - sidebarWidth - padding;
-      const availableHeight = window.innerHeight - headerHeight - statusBarHeight - padding;
+      const availableHeight = window.innerHeight - headerHeight - statusBarHeight - mobileToolbarHeight - padding;
       
       setCanvasSize({
         width: Math.max(600, Math.min(1200, availableWidth)),
@@ -46,6 +51,31 @@ function App() {
       clearTimeout(timer);
     };
   }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case 'z':
+            e.preventDefault();
+            if (e.shiftKey) {
+              if (canRedo()) redo();
+            } else {
+              if (canUndo()) undo();
+            }
+            break;
+          case 'y':
+            e.preventDefault();
+            if (canRedo()) redo();
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo, canUndo, canRedo]);
 
   if (isLoading) {
     return (
@@ -78,16 +108,6 @@ function App() {
           </div>
         </div>
 
-        {/* Mobile Bottom Toolbar */}
-        {isMobile && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40 p-2">
-            <div className="flex justify-around items-center">
-              {/* Mobile toolbar content would go here */}
-              <div className="text-xs text-gray-500">Mobile tools coming soon</div>
-            </div>
-          </div>
-        )}
-
         {/* Main Canvas Area */}
         <div className="flex-1 flex flex-col relative">
           <div className="flex-1 flex items-center justify-center p-8 bg-gradient-to-br from-gray-50 to-gray-100">
@@ -101,10 +121,13 @@ function App() {
             </div>
           </div>
           
-          {/* Floating Zoom Controls */}
-          <ZoomControls />
+          {/* Floating Zoom Controls - Desktop Only */}
+          {!isMobile && <ZoomControls />}
         </div>
       </div>
+
+      {/* Mobile Toolbar */}
+      {isMobile && <MobileToolbar />}
 
       <StatusBar />
     </div>

@@ -1,13 +1,18 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { CanvasState, Layer, HexCell, Tool, ColorPalette, User, Delta } from '../types';
+import { CanvasState, Layer, HexCell, Tool, ColorPalette, User, AnyCommand, PaintCommand, EraseCommand } from '../types';
 
 interface CanvasStore extends CanvasState {
   // Canvas state
   selectedColor: string;
   activeTool: string;
-  history: Delta[][];
+  isPainting: boolean;
+  lastPaintedCell: string | null;
+  
+  // History system
+  history: AnyCommand[];
   historyIndex: number;
+  maxHistorySize: number;
   
   // Collaboration
   users: User[];
@@ -26,6 +31,8 @@ interface CanvasStore extends CanvasState {
   
   paintCell: (q: number, r: number, color: string) => void;
   eraseCell: (q: number, r: number) => void;
+  startPainting: () => void;
+  stopPainting: () => void;
   
   setSelectedColor: (color: string) => void;
   setActiveTool: (toolId: string) => void;
@@ -34,8 +41,11 @@ interface CanvasStore extends CanvasState {
   setPan: (x: number, y: number) => void;
   toggleGrid: () => void;
   
+  executeCommand: (command: AnyCommand) => void;
   undo: () => void;
   redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
   
   addPalette: (palette: ColorPalette) => void;
   setActivePalette: (paletteId: string) => void;
@@ -76,8 +86,14 @@ export const useCanvasStore = create<CanvasStore>()(
     showGrid: true,
     selectedColor: '#FF5733',
     activeTool: 'brush',
-    history: [[]],
-    historyIndex: 0,
+    isPainting: false,
+    lastPaintedCell: null,
+    
+    // History
+    history: [],
+    historyIndex: -1,
+    maxHistorySize: 100,
+    
     users: [],
     currentUser: {
       id: `user-${Date.now()}`,
@@ -130,43 +146,190 @@ export const useCanvasStore = create<CanvasStore>()(
       }
     }),
 
-    paintCell: (q, r, color) => set((state) => {
-      const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
-      if (activeLayer && !activeLayer.locked) {
-        const cellId = `${q},${r}`;
-        const cell: HexCell = {
-          id: cellId,
-          q,
-          r,
-          color,
-          layerId: activeLayer.id,
-          timestamp: Date.now()
-        };
-        activeLayer.cells.set(cellId, cell);
-        
-        // Add to history
-        const delta: Delta = {
-          type: 'cell_update',
-          payload: { cellId, color, layerId: activeLayer.id },
-          timestamp: Date.now(),
-          userId: state.currentUser.id
-        };
-        
-        if (state.historyIndex < state.history.length - 1) {
-          state.history.splice(state.historyIndex + 1);
-        }
-        state.history.push([delta]);
-        state.historyIndex = state.history.length - 1;
-      }
+    startPainting: () => set((state) => {
+      state.isPainting = true;
+      state.lastPaintedCell = null;
     }),
 
-    eraseCell: (q, r) => set((state) => {
-      const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
-      if (activeLayer && !activeLayer.locked) {
-        const cellId = `${q},${r}`;
-        activeLayer.cells.delete(cellId);
-      }
+    stopPainting: () => set((state) => {
+      state.isPainting = false;
+      state.lastPaintedCell = null;
     }),
+
+    paintCell: (q, r, color) => {
+      const state = get();
+      const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+      
+      if (!activeLayer || activeLayer.locked) return;
+      
+      const cellId = `${q},${r}`;
+      
+      // Prevent painting the same cell repeatedly during drag
+      if (state.isPainting && state.lastPaintedCell === cellId) return;
+      
+      const existingCell = activeLayer.cells.get(cellId);
+      const wasEmpty = !existingCell;
+      const previousColor = existingCell?.color;
+      
+      // Don't paint if the color is the same
+      if (existingCell && existingCell.color === color) return;
+      
+      const command: PaintCommand = {
+        type: 'paint',
+        cellId,
+        layerId: activeLayer.id,
+        newColor: color,
+        previousColor,
+        wasEmpty,
+        timestamp: Date.now(),
+        userId: state.currentUser.id,
+        execute: () => {
+          set((state) => {
+            const layer = state.layers.find(l => l.id === command.layerId);
+            if (layer) {
+              const cell: HexCell = {
+                id: cellId,
+                q,
+                r,
+                color: command.newColor,
+                layerId: layer.id,
+                timestamp: command.timestamp
+              };
+              layer.cells.set(cellId, cell);
+              state.lastPaintedCell = cellId;
+            }
+          });
+        },
+        undo: () => {
+          set((state) => {
+            const layer = state.layers.find(l => l.id === command.layerId);
+            if (layer) {
+              if (command.wasEmpty) {
+                layer.cells.delete(cellId);
+              } else if (command.previousColor) {
+                const cell: HexCell = {
+                  id: cellId,
+                  q,
+                  r,
+                  color: command.previousColor,
+                  layerId: layer.id,
+                  timestamp: Date.now()
+                };
+                layer.cells.set(cellId, cell);
+              }
+            }
+          });
+        }
+      };
+      
+      state.executeCommand(command);
+    },
+
+    eraseCell: (q, r) => {
+      const state = get();
+      const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+      
+      if (!activeLayer || activeLayer.locked) return;
+      
+      const cellId = `${q},${r}`;
+      const existingCell = activeLayer.cells.get(cellId);
+      
+      if (!existingCell) return;
+      
+      // Prevent erasing the same cell repeatedly during drag
+      if (state.isPainting && state.lastPaintedCell === cellId) return;
+      
+      const command: EraseCommand = {
+        type: 'erase',
+        cellId,
+        layerId: activeLayer.id,
+        previousColor: existingCell.color,
+        timestamp: Date.now(),
+        userId: state.currentUser.id,
+        execute: () => {
+          set((state) => {
+            const layer = state.layers.find(l => l.id === command.layerId);
+            if (layer) {
+              layer.cells.delete(cellId);
+              state.lastPaintedCell = cellId;
+            }
+          });
+        },
+        undo: () => {
+          set((state) => {
+            const layer = state.layers.find(l => l.id === command.layerId);
+            if (layer) {
+              const cell: HexCell = {
+                id: cellId,
+                q,
+                r,
+                color: command.previousColor,
+                layerId: layer.id,
+                timestamp: Date.now()
+              };
+              layer.cells.set(cellId, cell);
+            }
+          });
+        }
+      };
+      
+      state.executeCommand(command);
+    },
+
+    executeCommand: (command) => set((state) => {
+      // Execute the command
+      command.execute();
+      
+      // Add to history
+      if (state.historyIndex < state.history.length - 1) {
+        // Remove any commands after current index
+        state.history.splice(state.historyIndex + 1);
+      }
+      
+      state.history.push(command);
+      
+      // Limit history size
+      if (state.history.length > state.maxHistorySize) {
+        state.history.shift();
+      } else {
+        state.historyIndex++;
+      }
+      
+      // Ensure historyIndex is correct
+      state.historyIndex = state.history.length - 1;
+    }),
+
+    undo: () => {
+      const state = get();
+      if (state.canUndo()) {
+        const command = state.history[state.historyIndex];
+        command.undo();
+        set((state) => {
+          state.historyIndex--;
+        });
+      }
+    },
+
+    redo: () => {
+      const state = get();
+      if (state.canRedo()) {
+        set((state) => {
+          state.historyIndex++;
+        });
+        const command = state.history[state.historyIndex];
+        command.execute();
+      }
+    },
+
+    canUndo: () => {
+      const state = get();
+      return state.historyIndex >= 0;
+    },
+
+    canRedo: () => {
+      const state = get();
+      return state.historyIndex < state.history.length - 1;
+    },
 
     setSelectedColor: (color) => set((state) => {
       state.selectedColor = color;
@@ -180,7 +343,6 @@ export const useCanvasStore = create<CanvasStore>()(
       state.zoom = Math.max(0.1, Math.min(5, zoom));
     }),
 
-    // FIX #2: Simplified setPan function
     setPan: (x, y) => set((state) => {
       state.panX = x;
       state.panY = y;
@@ -190,26 +352,8 @@ export const useCanvasStore = create<CanvasStore>()(
       state.showGrid = !state.showGrid;
     }),
 
-    undo: () => set((state) => {
-      if (state.historyIndex > 0) {
-        state.historyIndex--;
-        // Apply reverse of current state
-        // Implementation would reverse the last operation
-      }
-    }),
-
-    redo: () => set((state) => {
-      if (state.historyIndex < state.history.length - 1) {
-        state.historyIndex++;
-        // Reapply operation
-      }
-    }),
-
-    // FIX #3: Ensure palette updates trigger re-renders properly
     addPalette: (palette) => set((state) => {
-      // Use immer to ensure proper state updates
       state.palettes.push(palette);
-      // Immediately set as active to ensure UI updates
       state.activePaletteId = palette.id;
     }),
 
@@ -258,6 +402,9 @@ export const useCanvasStore = create<CanvasStore>()(
             cells: new Map(layer.cells)
           }));
           state.activeLayerId = state.layers[0]?.id || '';
+          // Clear history when importing
+          state.history = [];
+          state.historyIndex = -1;
         }
       } catch (error) {
         console.error('Failed to import canvas:', error);
@@ -266,10 +413,13 @@ export const useCanvasStore = create<CanvasStore>()(
   }))
 );
 
-// Initialize active layer
-setTimeout(() => {
+// Initialize active layer properly
+const initializeStore = () => {
   const store = useCanvasStore.getState();
   if (store.layers.length > 0 && !store.activeLayerId) {
     store.setActiveLayer(store.layers[0].id);
   }
-}, 0);
+};
+
+// Initialize after store creation
+setTimeout(initializeStore, 0);

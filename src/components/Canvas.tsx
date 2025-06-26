@@ -24,8 +24,11 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     showGrid,
     selectedColor,
     activeTool,
+    isPainting,
     paintCell,
     eraseCell,
+    startPainting,
+    stopPainting,
     setPan,
     setZoom,
     users,
@@ -165,6 +168,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      // Pan mode
       setIsDragging(true);
       panOffset.current = { x: e.clientX - panX, y: e.clientY - panY };
       return;
@@ -174,13 +178,15 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       const { x, y } = getMousePos(e);
       const axial = grid.pixelToAxial(x, y);
       
+      startPainting();
+      
       if (activeTool === 'brush') {
         paintCell(axial.q, axial.r, selectedColor);
       } else if (activeTool === 'eraser') {
         eraseCell(axial.q, axial.r);
       }
     }
-  }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, panX, panY]);
+  }, [getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell, startPainting, panX, panY]);
 
   // Throttled mouse move for performance
   const handleMouseMove = useMemo(() => throttle((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -191,14 +197,27 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
       return;
     }
 
+    // Continue painting/erasing while dragging
+    if (isPainting) {
+      const { x, y } = getMousePos(e);
+      const axial = grid.pixelToAxial(x, y);
+      
+      if (activeTool === 'brush') {
+        paintCell(axial.q, axial.r, selectedColor);
+      } else if (activeTool === 'eraser') {
+        eraseCell(axial.q, axial.r);
+      }
+    }
+
     // Update cursor position for collaboration
     const { x, y } = getMousePos(e);
     // In a real app, this would broadcast cursor position to other users
-  }, 16), [isDragging, setPan, getMousePos]);
+  }, 16), [isDragging, isPainting, setPan, getMousePos, grid, activeTool, selectedColor, paintCell, eraseCell]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
-  }, []);
+    stopPainting();
+  }, [stopPainting]);
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
